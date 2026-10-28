@@ -1,0 +1,6 @@
+{
+  "name": "COLORLINK - Ecosistema Inteligente de Pintura y Recubrimientos",
+  "description": "Plataforma integral que convierte requerimientos técnicos de recubrimientos en soluciones técnicas, comerciales y operacionales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

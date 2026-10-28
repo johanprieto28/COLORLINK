@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --colorlink-navy: #092653;
+  --colorlink-blue: #155EEF;
+  --colorlink-turquoise: #08B6CC;
+  --colorlink-yellow: #FFE34D;
+  --colorlink-bg: #FAFAF7;
+  --colorlink-surface: #E7EAF0;
+  --colorlink-text: #15243B;
+}
+
+@layer base {
+  html {
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    scroll-behavior: smooth;
+    color: #15243B;
+    background-color: #FAFAF7;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Smooth horizontal strip without intrusive scrollbars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
