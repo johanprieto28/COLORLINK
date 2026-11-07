@@ -40,6 +40,93 @@
   scrollbar-width: none;
 }
 
+/* ------------------------------------------------------------------------------
+   Animaciones de la interfaz
+   ------------------------------------------------------------------------------ */
+:root {
+  --cl-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --cl-ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@keyframes cl-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cl-pop {
+  0% { transform: scale(0.6); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes cl-toast-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cl-dropdown-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cl-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Cambio de vista (ruta) */
+.cl-view-enter { animation: cl-fade-up 0.42s var(--cl-ease-out) backwards; }
+/* Contador que "rebota" cuando cambia (carrito, favoritos) */
+.cl-pop { animation: cl-pop 0.36s var(--cl-ease-out); }
+.cl-toast { animation: cl-toast-in 0.32s var(--cl-ease-out) both; }
+.cl-dropdown { transform-origin: top right; animation: cl-dropdown-in 0.18s var(--cl-ease-out) both; }
+.cl-slide-down { animation: cl-slide-down 0.24s var(--cl-ease-out) backwards; }
+
+@keyframes cl-assistant-in {
+  from { opacity: 0; transform: translateY(16px) scale(0.95); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cl-fade { from { opacity: 0; } to { opacity: 1; } }
+/* Ventana del asistente: crece desde el botón flotante */
+.cl-assistant { transform-origin: bottom right; animation: cl-assistant-in 0.3s var(--cl-ease-out) backwards; }
+.cl-fade { animation: cl-fade 0.25s ease-out backwards; }
+
+@keyframes cl-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+/* Aviso visual cuando se intenta algo no permitido (p. ej. un tercer color) */
+.cl-shake { animation: cl-shake 0.4s ease-in-out; }
+
+/* Encabezado: gana sombra al desplazarse */
+.cl-header { transition: box-shadow 0.25s ease, background-color 0.25s ease; }
+.cl-header[data-scrolled='true'] { box-shadow: 0 6px 24px -12px rgba(9, 38, 83, 0.25); }
+
+/* Fondo oscuro de modales y del carrito: aparece y desaparece con opacidad */
+.cl-overlay { transition: opacity 0.25s var(--cl-ease-out); }
+.cl-overlay[data-state='closed'] { opacity: 0; }
+
+/* Carrito lateral */
+.cl-drawer { transition: transform 0.38s var(--cl-ease-out); }
+.cl-overlay[data-state='closed'] .cl-drawer { transform: translateX(100%); transition-timing-function: var(--cl-ease-in); transition-duration: 0.24s; }
+
+/* Modales: escala suave en escritorio, sube desde abajo en móvil */
+.cl-modal { transition: transform 0.32s var(--cl-ease-out), opacity 0.25s var(--cl-ease-out); }
+.cl-overlay[data-state='closed'] .cl-modal { opacity: 0; transform: translateY(16px) scale(0.97); }
+@media (max-width: 639px) {
+  .cl-overlay[data-state='closed'] .cl-modal-sheet { transform: translateY(100%); opacity: 1; }
+}
+
+/* Aparición al desplazarse: la clase la agrega useScrollReveal solo a lo que está fuera de pantalla */
+.cl-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s var(--cl-ease-out), transform 0.7s var(--cl-ease-out);
+  transition-delay: var(--cl-reveal-delay, 0ms);
+}
+.cl-reveal.is-visible { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-reveal { opacity: 1; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

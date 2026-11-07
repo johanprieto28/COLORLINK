@@ -13,12 +13,9 @@ import {
   CheckCircle2,
   ChevronRight,
 } from 'lucide-react';
-import { HumidityLevel, WearLevel } from '../../types';
-import {
-  runColorlinkAIDiagnosis,
-  AIDiagnosisResult,
-} from '../../services/diagnostics/diagnosticService';
-import { ActiveView, SolutionCategoryKey } from '../layout/Navbar';
+import { AIDiagnosisResult, AsistenteAccion, AsistenteRespuesta, HumidityLevel, WearLevel } from '../../types';
+import { api, errorMessage } from '../../lib/api';
+import { ActiveView, navigate } from '../../lib/router';
 import {
   ColorExplorerFilterRequest,
   ExplorerColorItem,
@@ -28,10 +25,10 @@ import { WizardPrefill } from '../../App';
 
 export interface FloatingAssistantWidgetProps {
   isOpen: boolean;
+  /** Vista actual: se envía como contexto para que las respuestas sean pertinentes */
+  currentView: ActiveView;
   onOpen: () => void;
   onClose: () => void;
-  onNavigate: (view: ActiveView) => void;
-  onSelectCategory: (category: SolutionCategoryKey) => void;
   onExploreColors: (filter?: Omit<ColorExplorerFilterRequest, 'timestamp'>) => void;
   onStartProjectWithPrefill: (prefill?: WizardPrefill) => void;
 }
@@ -49,7 +46,10 @@ interface ChatAction {
   label: string;
   variant?: 'primary' | 'secondary' | 'ghost';
   colorFilter?: Omit<ColorExplorerFilterRequest, 'timestamp'>;
+  /** Acción sugerida por el asistente en el servidor */
+  serverAction?: AsistenteAccion;
   actionType:
+    | 'SERVER_ACTION'
     | 'OPEN_TECH_FORM'
     | 'EXPAND_MODAL'
     | 'EXPLORE_COLORS'
@@ -79,6 +79,20 @@ const QUICK_PROMPTS: string[] = [
   'Quiero pintar una habitación.',
   'Crear un proyecto.',
 ];
+
+/** Identificador de la conversación en esta pestaña (las conversaciones se registran en la base de datos) */
+function getSessionId(): string {
+  const KEY = 'colorlink_ia_session';
+  try {
+    const existing = window.sessionStorage.getItem(KEY);
+    if (existing) return existing;
+    const created = crypto.randomUUID();
+    window.sessionStorage.setItem(KEY, created);
+    return created;
+  } catch {
+    return `ses-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
 
 const WELCOME_MESSAGE =
   '¡Hola! Soy COLORLINK IA. Te ayudo a encontrar el color ideal, orientar el cuidado de tus superficies o iniciar tu proyecto. ¿Qué necesitas transformar hoy?';
@@ -181,10 +195,9 @@ function inferParametersFromText(
 
 export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = ({
   isOpen,
+  currentView,
   onOpen,
   onClose,
-  onNavigate,
-  onSelectCategory,
   onExploreColors,
   onStartProjectWithPrefill,
 }) => {
@@ -194,13 +207,14 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [showCompactForm, setShowCompactForm] = useState(false);
 
+  const sessionIdRef = useRef<string>(getSessionId());
   const [techForm, setTechForm] = useState<TechnicalFormState>({
-    need: 'Quiero renovar las paredes de un espacio interior con humedad leve y pequeñas fisuras.',
+    need: '',
     surface: 'MAMPOSTERIA',
     location: 'INTERIOR',
-    humidity: 'MEDIA',
-    cracks: true,
-    wear: 'MODERADO',
+    humidity: 'BAJA',
+    cracks: false,
+    wear: 'LEVE',
   });
 
   const [latestResult, setLatestResult] = useState<AIDiagnosisResult | null>(null);
@@ -248,15 +262,15 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
     setIsAnalyzing(true);
     setAnalysisError(null);
     try {
-      const diagnosis = await runColorlinkAIDiagnosis({
+      const diagnosis = await api.post<AIDiagnosisResult>('/ia/diagnostico', {
+        sessionId: sessionIdRef.current,
         tipoSuperficie: formToRun.surface,
         ubicacion: formToRun.location,
         ambiente: 'RESIDENCIAL',
-        areaAproximada: 45,
         humedad: formToRun.humidity,
         fisuras: formToRun.cracks,
         desgaste: formToRun.wear,
-        desprendimiento: formToRun.humidity === 'ALTA',
+        desprendimiento: formToRun.wear === 'AVANZADO',
         descripcionProblema: formToRun.need,
       });
 
@@ -285,9 +299,8 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
           ],
         },
       ]);
-    } catch (err: any) {
-      const message =
-        err?.message || 'No fue posible completar el análisis en este momento. Intenta nuevamente.';
+    } catch (err) {
+      const message = errorMessage(err);
       setAnalysisError(message);
       setMessages((prev) => [
         ...prev,
@@ -529,57 +542,94 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
       lower.includes('blanco') ||
       lower.includes('terracota');
 
-    if (mentionsColorOrMood && !mentionsSurfacePathology) {
-      const rec = suggestColorsFromUserText(trimmed);
+    // Si habla de una superficie, se precarga el formulario técnico para "Crear proyecto con estos datos"
+    if (mentionsSurfacePathology) {
+      setTechForm(inferParametersFromText(trimmed, techForm));
+    }
+    const colorRec = mentionsColorOrMood && !mentionsSurfacePathology ? suggestColorsFromUserText(trimmed) : null;
+
+    // Historial en texto plano (sin el saludo inicial) para que la IA mantenga el hilo
+    const historial = [...messages, userMsg]
+      .filter((m) => m.id !== 'welcome-msg' && m.text.trim())
+      .slice(-10)
+      .map((m) => ({ rol: m.sender === 'user' ? 'usuario' : 'asistente', texto: m.text }));
+
+    setIsAnalyzing(true);
+    try {
+      const res = await api.post<AsistenteRespuesta>('/ia/chat', {
+        sessionId: sessionIdRef.current,
+        vista: currentView,
+        mensajes: historial,
+      });
+      const actions: ChatAction[] = res.acciones.map((a, i) => ({
+        label: a.etiqueta,
+        variant: i === 0 ? 'primary' : 'secondary',
+        actionType: 'SERVER_ACTION',
+        serverAction: a,
+      }));
+      if (mentionsSurfacePathology) {
+        actions.push({ label: 'Evaluar mi superficie', variant: 'ghost', actionType: 'OPEN_TECH_FORM' });
+      }
       setMessages((prev) => [
         ...prev,
         {
-          id: `ast-${Date.now() + 1}`,
+          id: `ast-${Date.now()}`,
           sender: 'assistant',
-          text: rec.explanation,
-          suggestedColors: rec.suggestedColors,
-          actions: [
-            {
-              label: 'Ver selección en el explorador',
-              variant: 'primary',
-              actionType: 'EXPLORE_COLORS',
-              colorFilter: {
-                environment: rec.detectedEnvironment,
-                mood: rec.detectedMood,
-                colorId: rec.suggestedColors[0]?.id,
-              },
-            },
-            {
-              label: 'Probar en mi espacio',
-              variant: 'secondary',
-              actionType: 'EXPLORE_COLORS',
-              colorFilter: {
-                environment: rec.detectedEnvironment,
-                mood: rec.detectedMood,
-                colorId: rec.suggestedColors[0]?.id,
-                openSimulator: true,
-              },
-            },
-            {
-              label: 'Evaluar también mi pared',
-              variant: 'ghost',
-              actionType: 'OPEN_TECH_FORM',
-            },
-          ],
+          text: res.respuesta,
+          suggestedColors: colorRec?.suggestedColors,
+          actions,
         },
       ]);
-      return;
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        { id: `ai-err-${Date.now()}`, sender: 'assistant', text: `No pude responder en este momento: ${errorMessage(err)}` },
+      ]);
+    } finally {
+      setIsAnalyzing(false);
     }
+  };
 
-    const updatedForm = inferParametersFromText(trimmed, techForm);
-    setTechForm(updatedForm);
-    await executeTechnicalEvaluation(updatedForm);
+  const runServerAction = (a: AsistenteAccion) => {
+    switch (a.tipo) {
+      case 'IR_TIENDA':
+        navigate('tienda', undefined, { categoria: a.valor });
+        break;
+      case 'VER_PRODUCTO':
+        if (a.valor) navigate('producto', a.valor);
+        break;
+      case 'EXPLORAR_COLORES':
+        onExploreColors(a.valor ? { colorId: a.valor } : undefined);
+        break;
+      case 'CREAR_PROYECTO':
+        onStartProjectWithPrefill(undefined);
+        break;
+      case 'VER_PROYECTOS':
+        navigate('mis-proyectos');
+        break;
+      case 'VER_SOLUCIONES':
+        navigate('soluciones', undefined, { categoria: a.valor });
+        break;
+      case 'VER_CARRITO':
+        navigate('carrito');
+        break;
+      case 'VER_PEDIDOS':
+        navigate('cuenta', 'pedidos');
+        break;
+    }
   };
 
   const handleActionClick = (action: ChatAction, snapshot?: TechnicalFormState) => {
     const activeForm = snapshot || techForm;
 
     switch (action.actionType) {
+      case 'SERVER_ACTION':
+        if (action.serverAction) {
+          setIsExpanded(false);
+          onClose();
+          runServerAction(action.serverAction);
+        }
+        break;
       case 'OPEN_TECH_FORM':
         setShowCompactForm(true);
         break;
@@ -611,26 +661,22 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
       case 'GO_CATEGORY_HUMEDAD':
         setIsExpanded(false);
         onClose();
-        onSelectCategory('HUMEDAD');
-        onNavigate('soluciones');
+        navigate('soluciones', undefined, { categoria: 'HUMEDAD' });
         break;
       case 'GO_CATEGORY_INTERIOR':
         setIsExpanded(false);
         onClose();
-        onSelectCategory('INTERIOR');
-        onNavigate('soluciones');
+        navigate('soluciones', undefined, { categoria: 'INTERIOR' });
         break;
       case 'GO_CATEGORY_FISURAS':
         setIsExpanded(false);
         onClose();
-        onSelectCategory('FISURAS');
-        onNavigate('soluciones');
+        navigate('soluciones', undefined, { categoria: 'FISURAS' });
         break;
       case 'GO_CATEGORY_PREPARACION':
         setIsExpanded(false);
         onClose();
-        onSelectCategory('PREPARACION');
-        onNavigate('soluciones');
+        navigate('soluciones', undefined, { categoria: 'PREPARACION' });
         break;
     }
   };
@@ -652,12 +698,12 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
             type="button"
             onClick={onOpen}
             aria-label="Abrir agente COLORLINK IA"
-            className="pointer-events-auto group inline-flex items-center justify-center gap-2.5 h-12 px-3 sm:pl-2.5 sm:pr-4 rounded-full bg-[#092653] hover:bg-[#155EEF] text-white border-2 border-white shadow-lg shadow-[#092653]/25 transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#08B6CC] cursor-pointer"
+            className="pointer-events-auto group inline-flex items-center justify-center gap-2.5 h-12 w-12 sm:w-auto sm:pl-2.5 sm:pr-4 rounded-full bg-[#092653] hover:bg-[#155EEF] text-white border-2 border-white shadow-lg shadow-[#092653]/25 transition-all duration-200 hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#08B6CC] cursor-pointer"
           >
             <span className="w-8 h-8 rounded-full bg-[#08B6CC] text-white flex items-center justify-center shrink-0">
               <Sparkles className="w-4 h-4 text-[#FFE34D]" />
             </span>
-            <span className="font-display text-xs font-extrabold tracking-wide whitespace-nowrap">
+            <span className="hidden sm:inline font-display text-xs font-extrabold tracking-wide whitespace-nowrap">
               COLORLINK IA
             </span>
           </button>
@@ -670,7 +716,7 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
       {isOpen && !isExpanded && (
         <section
           aria-label="Ventana de asistente COLORLINK IA"
-          className="fixed bottom-3 right-3 sm:bottom-5 sm:right-5 z-50 w-[calc(100vw-1.5rem)] max-w-[384px] sm:w-[380px] h-[min(520px,calc(100dvh-1.5rem))] sm:h-[min(520px,calc(100dvh-2.5rem))] bg-white rounded-2xl border border-[#E7EAF0] shadow-2xl shadow-[#092653]/20 flex flex-col overflow-hidden"
+          className="cl-assistant fixed bottom-3 right-3 sm:bottom-5 sm:right-5 z-50 w-[calc(100vw-1.5rem)] max-w-[384px] sm:w-[380px] h-[min(520px,calc(100dvh-1.5rem))] sm:h-[min(520px,calc(100dvh-2.5rem))] bg-white rounded-2xl border border-[#E7EAF0] shadow-2xl shadow-[#092653]/20 flex flex-col overflow-hidden"
         >
           {/* Encabezado de la ventana flotante */}
           <div className="bg-[#092653] text-white px-4 py-3.5 flex items-center justify-between gap-2 shrink-0 border-b border-white/10">
@@ -1057,7 +1103,7 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
       {/* 3. VISTA AMPLIADA (MODAL DE ANÁLISIS TÉCNICO COMPLETO)              */}
       {/* =================================================================== */}
       {isOpen && isExpanded && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs">
+        <div className="cl-fade fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs">
           <div
             role="dialog"
             aria-modal="true"
@@ -1251,11 +1297,11 @@ export const FloatingAssistantWidget: React.FC<FloatingAssistantWidgetProps> = (
                       onClick={() => {
                         setIsExpanded(false);
                         onClose();
-                        onNavigate('colorlink-ia');
+                        onStartProjectWithPrefill(undefined);
                       }}
                       className="text-[#1D4ED8] hover:underline font-semibold cursor-pointer"
                     >
-                      Simulador técnico avanzado →
+                      Solicitar revisión de un técnico →
                     </button>
                   </div>
                 </form>

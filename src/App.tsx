@@ -3,32 +3,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { Navbar, ActiveView, SolutionCategoryKey } from './components/layout/Navbar';
+import React, { useEffect, useRef, useState } from 'react';
+import { Compass, Lock } from 'lucide-react';
+import { Navbar } from './components/layout/Navbar';
 import { Footer } from './components/layout/Footer';
 import { LandingView } from './components/views/LandingView';
 import { HowItWorksView } from './components/views/HowItWorksView';
 import { SolutionsCatalogView } from './components/views/SolutionsCatalogView';
+import { StoreView } from './components/views/StoreView';
+import { ProductDetailView } from './components/views/ProductDetailView';
+import { CartView, CONTINUAR_A_PAGO_KEY } from './components/views/CartView';
+import { CheckoutView } from './components/views/CheckoutView';
 import { NewProjectWizard } from './components/views/NewProjectWizard';
 import { ProjectsListView } from './components/views/ProjectsListView';
+import { ProjectsIntro } from './components/views/ProjectsIntro';
 import { ProjectDetailView } from './components/views/ProjectDetailView';
-import { ColorlinkAIView } from './components/views/ColorlinkAIView';
-import { TechnicalPanelView } from './components/views/TechnicalPanelView';
-import { CommercialPanelView } from './components/views/CommercialPanelView';
-import { OperationsPanelView } from './components/views/OperationsPanelView';
-import { AdminDashboardView } from './components/views/AdminDashboardView';
-import { UserProfileView } from './components/views/UserProfileView';
+import { AccountView } from './components/views/AccountView';
+import { PanelView } from './components/views/panel/PanelView';
 import { AuthView } from './components/views/AuthView';
-import { SupabaseStatusModal } from './components/common/SupabaseStatusModal';
-import { DevSupabaseDiagnostic } from './components/common/DevSupabaseDiagnostic';
 import { FloatingAssistantWidget } from './components/common/FloatingAssistantWidget';
-import { authService } from './services/auth/authService';
-import { projectService } from './services/projects/projectService';
+import { CartDrawer } from './components/store/CartDrawer';
+import { Button, Spinner, Toaster, usePresence } from './components/ui';
+import { navigate, useRoute } from './lib/router';
+import { normalizar } from './lib/format';
+import { useScrollReveal } from './lib/useScrollReveal';
+import { authStore, isStaffRole, useAuth } from './stores/auth';
+import './stores/cart';
+import './stores/favorites';
 import { ColorExplorerFilterRequest } from './data/colorExplorerData';
-import { UserRole, UserProfile, HumidityLevel, WearLevel } from './types';
+import { HumidityLevel, WearLevel } from './types';
 
 export interface WizardPrefill {
   colorRequerido?: string;
+  /** Ids de colores del catálogo (máximo 2) */
+  colores?: string[];
   tipoSuperficie?: string;
   ubicacion?: 'INTERIOR' | 'EXTERIOR' | 'MIXTO';
   descripcionProblema?: string;
@@ -37,393 +45,245 @@ export interface WizardPrefill {
   desgaste?: WearLevel;
 }
 
+const COLOR_KEYWORDS = ['color', 'paleta', 'tono', 'salvia', 'marfil', 'terracota', 'combinacion'];
+
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() => authService.getCurrentUser());
-  const [activeRole, setActiveRole] = useState<UserRole>(() => authService.getActiveRole());
-  const [currentView, setCurrentView] = useState<ActiveView>('inicio');
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('proj-001');
-  const [selectedCategory, setSelectedCategory] = useState<SolutionCategoryKey>('TODAS');
-  const [catalogSearchQuery, setCatalogSearchQuery] = useState<string>('');
+  const route = useRoute();
+  const { status, user, loginRequest } = useAuth();
   const [wizardPrefill, setWizardPrefill] = useState<WizardPrefill | undefined>(undefined);
-  const [colorExplorerRequest, setColorExplorerRequest] = useState<
-    ColorExplorerFilterRequest | undefined
-  >(undefined);
-
+  const [colorExplorerRequest, setColorExplorerRequest] = useState<ColorExplorerFilterRequest | undefined>(undefined);
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const pendingScroll = useRef<string | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  useScrollReveal(mainRef, route.view);
 
+  // Si el visitante tocó "Ingresar y pagar" en el carrito, al iniciar sesión sigue al pago
   useEffect(() => {
-    const unsubscribe = authService.subscribe((user) => {
-      if (user) {
-        setCurrentUser(user);
-        setActiveRole(user.rol);
+    if (!user) return;
+    try {
+      if (window.sessionStorage.getItem(CONTINUAR_A_PAGO_KEY)) {
+        window.sessionStorage.removeItem(CONTINUAR_A_PAGO_KEY);
+        navigate('checkout');
       }
-    });
-    return unsubscribe;
-  }, []);
-
-  const handleNavigate = (view: ActiveView, projectId?: string) => {
-    if (projectId) {
-      setSelectedProjectId(projectId);
+    } catch {
+      // almacenamiento no disponible
     }
-    setCurrentView(view);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [user]);
 
-  /**
-   * Inicia o retoma el formulario de proyecto fusionando los datos preseleccionados
-   * sin sobrescribir ni borrar los datos que el cliente ya haya ingresado previamente.
-   */
-  const handleStartProjectWithPrefill = (prefill?: WizardPrefill) => {
-    if (prefill) {
-      setWizardPrefill((prev) => ({
-        ...prev,
-        ...Object.fromEntries(
-          Object.entries(prefill).filter(([, value]) => value !== undefined && value !== '')
-        ),
-      }));
+  // Al cambiar de página: subir al inicio o a la sección pendiente
+  useEffect(() => {
+    const target = pendingScroll.current;
+    pendingScroll.current = null;
+    if (target) {
+      setTimeout(() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth' }), 90);
+    } else {
+      window.scrollTo({ top: 0 });
     }
-    setCurrentView('crear-proyecto');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [route.path]);
 
-  const scrollToSectionOnHome = (sectionId: string) => {
-    if (currentView !== 'inicio') {
-      setCurrentView('inicio');
-      setTimeout(() => {
-        document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
-      }, 90);
+  const scrollToHomeSection = (sectionId: string) => {
+    if (route.view !== 'inicio') {
+      pendingScroll.current = sectionId;
+      navigate('inicio');
     } else {
       document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
   const handleExploreColors = (filter?: Omit<ColorExplorerFilterRequest, 'timestamp'>) => {
-    setColorExplorerRequest({
-      ...(filter || {}),
-      timestamp: Date.now(),
-    });
-    scrollToSectionOnHome('encuentra-tu-color');
+    setColorExplorerRequest({ ...(filter || {}), timestamp: Date.now() });
+    scrollToHomeSection('encuentra-tu-color');
   };
 
-  const handleExploreInspiration = () => {
-    scrollToSectionOnHome('inspiracion');
-  };
-
-  const handleSelectCategory = (category: SolutionCategoryKey) => {
-    setSelectedCategory(category);
-    setCatalogSearchQuery('');
-  };
-
-  const handleSearchSubmit = (query: string) => {
-    const q = query
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '');
-
-    if (
-      q.includes('color') ||
-      q.includes('paleta') ||
-      q.includes('tono') ||
-      q.includes('salvia') ||
-      q.includes('marfil') ||
-      q.includes('terracota')
-    ) {
+  const handleSearch = (query: string) => {
+    if (query && COLOR_KEYWORDS.some((k) => normalizar(query).includes(k))) {
       handleExploreColors();
       return;
     }
-    if (q.includes('inspiracion') || q.includes('ambiente') || q.includes('idea')) {
-      handleExploreInspiration();
-      return;
-    }
-    if (q.includes('seguimiento') || q.includes('expediente') || q.includes('mis proyectos')) {
-      handleNavigate('mis-proyectos');
-      return;
-    }
-    if (q.includes('humedad') || q.includes('impermeab') || q.includes('filtrac') || q.includes('cubierta')) {
-      setSelectedCategory('HUMEDAD');
-    } else if (q.includes('fisura') || q.includes('grieta') || q.includes('rajadura')) {
-      setSelectedCategory('FISURAS');
-    } else if (q.includes('fachada') || q.includes('exterior')) {
-      setSelectedCategory('EXTERIOR');
-    } else if (q.includes('interior') || q.includes('sala') || q.includes('habitaci')) {
-      setSelectedCategory('INTERIOR');
-    } else if (q.includes('preparaci') || q.includes('estuco') || q.includes('lijado')) {
-      setSelectedCategory('PREPARACION');
-    } else if (q.includes('herramienta') || q.includes('rodillo') || q.includes('brocha')) {
-      setSelectedCategory('HERRAMIENTAS');
-    } else if (q.includes('decorativ') || q.includes('textura')) {
-      setSelectedCategory('DECORATIVOS');
-    } else {
-      setSelectedCategory('TODAS');
-    }
-    setCatalogSearchQuery(query);
-    handleNavigate('soluciones');
+    navigate('tienda', undefined, { q: query || undefined });
   };
 
-  const handleSelectProject = (projectId: string) => {
-    setSelectedProjectId(projectId);
-    setCurrentView('detalle-proyecto');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  /** Abre el asistente de proyecto conservando lo que el cliente ya había escrito */
+  const handleStartProjectWithPrefill = (prefill?: WizardPrefill) => {
+    if (prefill) {
+      setWizardPrefill((prev) => ({
+        ...prev,
+        ...Object.fromEntries(Object.entries(prefill).filter(([, v]) => v !== undefined && v !== '')),
+      }));
+    }
+    navigate('crear-proyecto');
   };
 
-  const handleSwitchRole = (role: UserRole) => {
-    authService.switchRole(role);
-    setActiveRole(role);
+  const requireLogin = (motivo: string, content: React.ReactNode) => {
+    if (status === 'cargando') return <Spinner label="Verificando tu sesión…" />;
+    if (!user) return <LoginGate motivo={motivo} />;
+    return content;
   };
 
-  const isInternalView =
-    currentView.startsWith('tecnico-') ||
-    currentView.startsWith('comercial-') ||
-    currentView.startsWith('operaciones-') ||
-    currentView.startsWith('admin-');
-
-  return (
-    <div className="min-h-screen bg-[#FAFAF7] text-[#15243B] flex flex-col font-sans selection:bg-[#08B6CC] selection:text-white">
-      {/* Diagnóstico técnico de Supabase reservado exclusivamente a administración interna */}
-      {activeRole === 'administrador' && (
-        <DevSupabaseDiagnostic
-          onDataLoaded={() => {
-            projectService.syncFromSupabase();
-          }}
-          onOpenAuthModal={() => setAuthModalOpen(true)}
-        />
-      )}
-
-      {/* Encabezado comercial en 3 niveles */}
-      <Navbar
-        currentView={currentView}
-        selectedCategory={selectedCategory}
-        onNavigate={handleNavigate}
-        onSelectCategory={handleSelectCategory}
-        onSearchSubmit={handleSearchSubmit}
-        onExploreColors={handleExploreColors}
-        onExploreInspiration={handleExploreInspiration}
-        onOpenAssistant={() => setAssistantOpen(true)}
-        currentUser={currentUser}
-        activeRole={activeRole}
-        onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
-        onOpenAuthModal={() => setAuthModalOpen(true)}
-      />
-
-      {/* Área principal dinámica */}
-      <main className="flex-1">
-        {currentView === 'inicio' && (
+  const renderView = () => {
+    switch (route.view) {
+      case 'inicio':
+        return (
           <LandingView
-            onNavigate={handleNavigate}
-            onSelectCategory={(cat) => {
-              handleSelectCategory(cat);
-              handleNavigate('soluciones');
-            }}
             onExploreColors={handleExploreColors}
             onStartProjectWithPrefill={handleStartProjectWithPrefill}
             onOpenAssistant={() => setAssistantOpen(true)}
-            onSwitchRole={handleSwitchRole}
-            onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
-            activeRole={activeRole}
             colorExplorerRequest={colorExplorerRequest}
           />
-        )}
-
-        {currentView === 'como-funciona' && (
-          <HowItWorksView onNavigate={handleNavigate} />
-        )}
-
-        {currentView === 'soluciones' && (
+        );
+      case 'tienda':
+        return (
+          <StoreView
+            categoria={route.query.get('categoria') || undefined}
+            q={route.query.get('q') || undefined}
+            orden={route.query.get('orden') || undefined}
+          />
+        );
+      case 'producto':
+        return <ProductDetailView slug={route.param!} onStartProjectWithPrefill={handleStartProjectWithPrefill} />;
+      case 'carrito':
+        return <CartView />;
+      case 'checkout':
+        return requireLogin('Inicia sesión para finalizar tu compra.', <CheckoutView />);
+      case 'soluciones':
+        return (
           <SolutionsCatalogView
-            onNavigate={handleNavigate}
+            initialCategory={(route.query.get('categoria') as any) || 'TODAS'}
             onOpenAssistant={() => setAssistantOpen(true)}
-            initialCategory={selectedCategory}
-            searchQuery={catalogSearchQuery}
-            onClearSearch={() => setCatalogSearchQuery('')}
             onStartProjectWithPrefill={handleStartProjectWithPrefill}
           />
-        )}
-
-        {currentView === 'crear-proyecto' && (
+        );
+      case 'como-funciona':
+        return <HowItWorksView />;
+      case 'mis-proyectos':
+        if (status === 'cargando') return <Spinner />;
+        return user ? <ProjectsListView /> : <ProjectsIntro />;
+      case 'crear-proyecto':
+        // Sin sesión se presenta el servicio en lugar de un aviso de "inicia sesión"
+        if (status !== 'cargando' && !user) return <ProjectsIntro />;
+        return requireLogin(
+          'Inicia sesión o crea tu cuenta para registrar tu proyecto y darle seguimiento.',
           <NewProjectWizard
             prefill={wizardPrefill}
             onSuccess={(id) => {
               setWizardPrefill(undefined);
-              handleSelectProject(id);
+              navigate('detalle-proyecto', id);
             }}
-            onCancel={() => {
-              handleNavigate(activeRole === 'cliente' ? 'inicio' : 'mis-proyectos');
-            }}
+            onCancel={() => navigate(isStaffRole(user) ? 'panel' : 'mis-proyectos')}
           />
-        )}
+        );
+      case 'detalle-proyecto':
+        return requireLogin('Inicia sesión para ver este proyecto.', <ProjectDetailView projectId={route.param!} />);
+      case 'cuenta':
+        return requireLogin('Inicia sesión para ver tu cuenta.', <AccountView tab={route.param || 'perfil'} />);
+      case 'panel':
+        return requireLogin(
+          'Inicia sesión con tu cuenta de COLORLINK para acceder al panel.',
+          isStaffRole(user) ? <PanelView section={route.param || 'resumen'} /> : <NoAccess />
+        );
+      default:
+        return <NotFound />;
+    }
+  };
 
-        {currentView === 'mis-proyectos' && (
-          <ProjectsListView
-            onSelectProject={handleSelectProject}
-            onCreateProject={() => handleStartProjectWithPrefill(undefined)}
-          />
-        )}
+  return (
+    <div className="min-h-screen bg-[#FAFAF7] text-[#15243B] flex flex-col font-sans selection:bg-[#08B6CC] selection:text-white">
+      <a
+        href="#contenido"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[80] focus:px-4 focus:py-2 focus:bg-white focus:rounded-xl focus:shadow"
+      >
+        Saltar al contenido
+      </a>
 
-        {currentView === 'seguimiento' && (
-          <ProjectsListView
-            onSelectProject={handleSelectProject}
-            onCreateProject={() => handleStartProjectWithPrefill(undefined)}
-            title="Seguimiento de proyectos"
-            subtitle="Consulta el estado actual, evidencias registradas, orientación técnica y próxima actividad de cada proyecto."
-          />
-        )}
+      <Navbar route={route} onSearch={handleSearch} onExploreColors={handleExploreColors} />
 
-        {currentView === 'detalle-proyecto' && (
-          <ProjectDetailView
-            projectId={selectedProjectId}
-            onBack={() => {
-              if (activeRole === 'tecnico') handleNavigate('tecnico-proyectos');
-              else if (activeRole === 'comercial') handleNavigate('comercial-proyectos');
-              else if (activeRole === 'operaciones') handleNavigate('operaciones-proyectos');
-              else if (activeRole === 'administrador') handleNavigate('admin-dashboard');
-              else handleNavigate('mis-proyectos');
-            }}
-          />
-        )}
-
-        {currentView === 'colorlink-ia' && (
-          <ColorlinkAIView
-            onApplyToNewProject={(data) => {
-              handleStartProjectWithPrefill({
-                descripcionProblema: data?.recomendacionPreliminar,
-              });
-            }}
-          />
-        )}
-
-        {/* Módulos internos especializados reservados exclusivamente para roles autorizados */}
-        {isInternalView && (
-          <div className="bg-slate-950 text-slate-100 min-h-[75vh]">
-            {currentView === 'tecnico-proyectos' && (
-              <TechnicalPanelView onSelectProject={handleSelectProject} subview="proyectos" />
-            )}
-            {currentView === 'tecnico-diagnosticos' && (
-              <TechnicalPanelView onSelectProject={handleSelectProject} subview="diagnosticos" />
-            )}
-            {currentView === 'tecnico-soluciones' && (
-              <TechnicalPanelView onSelectProject={handleSelectProject} subview="soluciones" />
-            )}
-            {currentView === 'tecnico-evidencias' && (
-              <TechnicalPanelView onSelectProject={handleSelectProject} subview="evidencias" />
-            )}
-
-            {currentView === 'comercial-clientes' && (
-              <CommercialPanelView onSelectProject={handleSelectProject} subview="clientes" />
-            )}
-            {currentView === 'comercial-proyectos' && (
-              <CommercialPanelView onSelectProject={handleSelectProject} subview="proyectos" />
-            )}
-            {currentView === 'comercial-cotizaciones' && (
-              <CommercialPanelView onSelectProject={handleSelectProject} subview="cotizaciones" />
-            )}
-
-            {currentView === 'operaciones-proyectos' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="proyectos" />
-            )}
-            {currentView === 'operaciones-inventario' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="inventario" />
-            )}
-            {currentView === 'operaciones-abastecimiento' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="abastecimiento" />
-            )}
-            {currentView === 'operaciones-servicios' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="servicios" />
-            )}
-            {currentView === 'operaciones-calidad' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="calidad" />
-            )}
-
-            {currentView === 'admin-dashboard' && (
-              <AdminDashboardView onSelectProject={handleSelectProject} subview="dashboard" />
-            )}
-            {currentView === 'admin-proyectos' && (
-              <div className="bg-[#FAFAF7] text-[#15243B]">
-                <ProjectsListView
-                  onSelectProject={handleSelectProject}
-                  onCreateProject={() => handleStartProjectWithPrefill(undefined)}
-                  title="Consola General de Proyectos"
-                  subtitle="Supervisión integral de todos los expedientes registrados en la plataforma."
-                />
-              </div>
-            )}
-            {currentView === 'admin-clientes' && (
-              <CommercialPanelView onSelectProject={handleSelectProject} subview="clientes" />
-            )}
-            {currentView === 'admin-inventario' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="inventario" />
-            )}
-            {currentView === 'admin-abastecimiento' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="abastecimiento" />
-            )}
-            {currentView === 'admin-servicios' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="servicios" />
-            )}
-            {currentView === 'admin-calidad' && (
-              <OperationsPanelView onSelectProject={handleSelectProject} subview="calidad" />
-            )}
-            {currentView === 'admin-usuarios' && (
-              <AdminDashboardView onSelectProject={handleSelectProject} subview="usuarios" />
-            )}
-            {currentView === 'admin-reportes' && (
-              <AdminDashboardView onSelectProject={handleSelectProject} subview="reportes" />
-            )}
-            {currentView === 'admin-configuracion' && (
-              <AdminDashboardView onSelectProject={handleSelectProject} subview="configuracion" />
-            )}
-          </div>
-        )}
-
-        {/* Perfil de usuario */}
-        {currentView === 'perfil' && (
-          <UserProfileView
-            currentUser={currentUser}
-            activeRole={activeRole}
-            onRoleSwitch={handleSwitchRole}
-            onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
-          />
-        )}
+      <main id="contenido" ref={mainRef} className="flex-1">
+        {/* La clave por vista reinicia la animación de entrada al cambiar de página */}
+        <div key={route.view} className="cl-view-enter">
+          {renderView()}
+        </div>
       </main>
 
-      {/* Pie de página comercial */}
-      <Footer
-        onNavigate={handleNavigate}
-        onSelectCategory={handleSelectCategory}
-        onExploreColors={handleExploreColors}
-        onExploreInspiration={handleExploreInspiration}
-        onOpenAssistant={() => setAssistantOpen(true)}
-        onOpenSupabaseModal={() => setSupabaseModalOpen(true)}
-        onSwitchRole={handleSwitchRole}
-        activeRole={activeRole}
-      />
+      <Footer onExploreColors={handleExploreColors} onOpenAssistant={() => setAssistantOpen(true)} />
 
-      {/* Agente flotante compacto COLORLINK IA */}
       <FloatingAssistantWidget
         isOpen={assistantOpen}
+        currentView={route.view}
         onOpen={() => setAssistantOpen(true)}
         onClose={() => setAssistantOpen(false)}
-        onNavigate={handleNavigate}
-        onSelectCategory={handleSelectCategory}
         onExploreColors={handleExploreColors}
         onStartProjectWithPrefill={handleStartProjectWithPrefill}
       />
 
-      {/* Modal de Estado de Conexión Supabase (Administración) */}
-      <SupabaseStatusModal
-        isOpen={supabaseModalOpen}
-        onClose={() => setSupabaseModalOpen(false)}
-      />
+      <LoginModal request={loginRequest} />
 
-      {/* Modal de Autenticación */}
-      {authModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <AuthView
-            onSuccess={() => setAuthModalOpen(false)}
-            onClose={() => setAuthModalOpen(false)}
-          />
-        </div>
-      )}
+      <CartDrawer />
+      <Toaster />
     </div>
   );
 }
+
+/** Modal de inicio de sesión / registro con animación de entrada y salida */
+const LoginModal: React.FC<{ request: ReturnType<typeof useAuth>['loginRequest'] }> = ({ request }) => {
+  const { mounted, state } = usePresence(Boolean(request));
+  // Conserva la última solicitud para seguir mostrándola mientras se anima el cierre
+  const ultima = useRef(request);
+  if (request) ultima.current = request;
+  if (!mounted || !ultima.current) return null;
+  return (
+    <div
+      data-state={state}
+      className="cl-overlay fixed inset-0 z-[60] flex items-center justify-center p-4 bg-[#092653]/55 backdrop-blur-sm overflow-y-auto"
+      onMouseDown={(e) => e.target === e.currentTarget && authStore.closeLogin()}
+    >
+      <div className="cl-modal w-full flex justify-center my-auto">
+        <AuthView
+          initialMode={ultima.current.modo}
+          motivo={ultima.current.motivo}
+          onSuccess={() => authStore.closeLogin()}
+          onClose={() => authStore.closeLogin()}
+        />
+      </div>
+    </div>
+  );
+};
+
+const LoginGate: React.FC<{ motivo: string }> = ({ motivo }) => (
+  <div className="max-w-md mx-auto px-4 py-20 text-center space-y-4">
+    <div className="w-14 h-14 mx-auto rounded-2xl bg-[#092653] text-[#08B6CC] flex items-center justify-center">
+      <Lock className="w-6 h-6" />
+    </div>
+    <h1 className="font-display text-2xl font-extrabold text-[#092653]">Necesitas iniciar sesión</h1>
+    <p className="text-sm text-slate-600">{motivo}</p>
+    <div className="flex flex-wrap justify-center gap-2 pt-2">
+      <Button onClick={() => authStore.requestLogin(motivo)}>Ingresar</Button>
+      <Button variant="secondary" onClick={() => authStore.requestLogin(motivo, 'register')}>
+        Crear cuenta
+      </Button>
+    </div>
+  </div>
+);
+
+const NoAccess: React.FC = () => (
+  <div className="max-w-md mx-auto px-4 py-20 text-center space-y-4">
+    <h1 className="font-display text-2xl font-extrabold text-[#092653]">Esta sección es para el equipo COLORLINK</h1>
+    <p className="text-sm text-slate-600">
+      Tu cuenta no tiene permisos de gestión. Si trabajas en COLORLINK, pide a un administrador que te asigne tu rol.
+    </p>
+    <Button onClick={() => navigate('inicio')}>Volver al inicio</Button>
+  </div>
+);
+
+const NotFound: React.FC = () => (
+  <div className="max-w-md mx-auto px-4 py-20 text-center space-y-4">
+    <Compass className="w-10 h-10 mx-auto text-[#155EEF]" />
+    <h1 className="font-display text-2xl font-extrabold text-[#092653]">No encontramos esta página</h1>
+    <p className="text-sm text-slate-600">Puede que el enlace haya cambiado. Te llevamos a un lugar conocido.</p>
+    <div className="flex justify-center gap-2">
+      <Button onClick={() => navigate('inicio')}>Ir al inicio</Button>
+      <Button variant="secondary" onClick={() => navigate('tienda')}>
+        Ver la tienda
+      </Button>
+    </div>
+  </div>
+);

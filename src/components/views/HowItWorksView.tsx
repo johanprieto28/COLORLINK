@@ -11,13 +11,9 @@ import {
   ArrowRight,
   ShieldCheck,
 } from 'lucide-react';
-import { ActiveView } from '../layout/Navbar';
+import { navigate } from '../../lib/router';
 
-interface HowItWorksViewProps {
-  onNavigate: (view: ActiveView) => void;
-}
-
-export const HowItWorksView: React.FC<HowItWorksViewProps> = ({ onNavigate }) => {
+export const HowItWorksView: React.FC = () => {
   const steps = [
     {
       num: '01',
@@ -125,7 +121,7 @@ export const HowItWorksView: React.FC<HowItWorksViewProps> = ({ onNavigate }) =>
         </div>
         <button
           type="button"
-          onClick={() => onNavigate('crear-proyecto')}
+          onClick={() => navigate('crear-proyecto')}
           className="px-6 py-3.5 bg-[#0891B2] hover:bg-[#0E7490] text-white font-semibold rounded-xl text-sm inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
         >
           <span>Crear mi proyecto</span>

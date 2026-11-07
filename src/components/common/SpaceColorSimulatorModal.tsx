@@ -22,7 +22,7 @@ import {
   getCategoryLabel,
   getIntensityLabel,
 } from '../../data/colorExplorerData';
-import { PaintBucketPackshot } from './PaintBucketPackshot';
+import { ColorPackshot } from './ColorPackshot';
 
 interface SpaceColorSimulatorModalProps {
   isOpen: boolean;
@@ -34,6 +34,7 @@ interface SpaceColorSimulatorModalProps {
   onSelectColorInExplorer?: (color: ExplorerColorItem) => void;
   onUseInProject: (payload: {
     colorLabel: string;
+    colorIds: string[];
     ubicacion: 'INTERIOR' | 'EXTERIOR';
     suggestedNote?: string;
   }) => void;
@@ -190,6 +191,8 @@ export const SpaceColorSimulatorModal: React.FC<SpaceColorSimulatorModalProps> =
 
     onUseInProject({
       colorLabel,
+      // El proyecto admite hasta 2 colores: el principal y, si se está comparando, el segundo
+      colorIds: isComparing && compareColor.id !== primaryColor.id ? [primaryColor.id, compareColor.id] : [primaryColor.id],
       ubicacion,
       suggestedNote,
     });
@@ -265,32 +268,24 @@ export const SpaceColorSimulatorModal: React.FC<SpaceColorSimulatorModalProps> =
                 {isComparing && compareColor.id !== primaryColor.id ? (
                   <div className="w-full flex items-end justify-center gap-3 sm:gap-5 py-2">
                     <div className="flex flex-col items-center">
-                      <PaintBucketPackshot
-                        color={primaryColor}
-                        size="card"
-                        className="w-36 sm:w-44"
-                      />
+                      <ColorPackshot color={primaryColor} size="card" className="w-36! sm:w-44!" />
                       <span className="text-xs font-bold text-[#092653] mt-1">
                         {primaryColor.name}
                       </span>
                     </div>
                     <div className="flex flex-col items-center opacity-95">
-                      <PaintBucketPackshot
-                        color={compareColor}
-                        size="mini"
-                        className="w-28 sm:w-32"
-                      />
+                      <ColorPackshot color={compareColor} size="mini" />
                       <span className="text-[11px] font-semibold text-slate-600 mt-1">
                         {compareColor.name}
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <PaintBucketPackshot color={primaryColor} size="detail" />
+                  <ColorPackshot color={primaryColor} size="detail" />
                 )}
 
                 <p className="text-[11px] text-slate-500 text-center mt-2">
-                  Recipiente ilustrativo de demostración · Marca COLORLINK
+                  Presentación de referencia · Marca COLORLINK
                 </p>
               </div>
 

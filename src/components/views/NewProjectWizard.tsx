@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  CheckCircle2,
   User,
   Building,
-  MapPin,
   Layers,
   Sparkles,
   Camera,
@@ -15,12 +15,36 @@ import {
   Check,
   Palette,
   RefreshCw,
+  FileText,
 } from 'lucide-react';
-import { ProjectFormData, HumidityLevel, WearLevel, ClientType } from '../../types';
-import { projectService } from '../../services/projects/projectService';
-import { uploadEvidenceFile } from '../../services/storage/storageService';
-import { runColorlinkAIDiagnosis, AIDiagnosisResult } from '../../services/diagnostics/diagnosticService';
-import { authService } from '../../services/auth/authService';
+import {
+  AIDiagnosisResult,
+  ClientType,
+  HumidityLevel,
+  ProjectFormData,
+  Proyecto,
+  ValidacionReporte,
+  WearLevel,
+} from '../../types';
+import { ValidacionReportePanel } from '../common/ValidacionReportePanel';
+import { CiudadCombobox } from '../common/CiudadCombobox';
+import {
+  ayudaDocumento,
+  DOCUMENTOS,
+  filtrar,
+  LIMITES,
+  normalizar,
+  validarCampo,
+  type TipoDocumento,
+  type TipoDocumentoPersona,
+} from '../../data/reglasRegistro';
+import { navigate } from '../../lib/router';
+import { useColores } from '../../lib/useColores';
+import { MAX_COLORES_PROYECTO } from '../../data/colores';
+import { ColorPicker } from '../common/ColorPicker';
+import { api, errorMessage, fileToUpload } from '../../lib/api';
+import { isStaffRole, useAuth } from '../../stores/auth';
+import { toast } from '../ui';
 import { WizardPrefill } from '../../App';
 
 interface NewProjectWizardProps {
@@ -29,65 +53,65 @@ interface NewProjectWizardProps {
   onCancel: () => void;
 }
 
-const WIZARD_DRAFT_STORAGE_KEY = 'colorlink_project_wizard_draft_v1';
-const DEFAULT_PROBLEM_DESC =
-  'Busco renovar el espacio corrigiendo pequeñas fisuras y asegurando un acabado lavable y duradero.';
+/** Borrador temporal del formulario en esta pestaña; el proyecto se guarda en la base de datos al confirmar */
+const WIZARD_DRAFT_STORAGE_KEY = 'colorlink_project_wizard_draft_v2';
 
 export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
   prefill,
   onSuccess,
   onCancel,
 }) => {
-  const currentUser = authService.getCurrentUser();
+  const { user } = useAuth();
+  const staff = isStaffRole(user);
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [aiPreview, setAiPreview] = useState<AIDiagnosisResult | null>(null);
   const [stepValidationMsg, setStepValidationMsg] = useState<string | null>(null);
+  const [validacion, setValidacion] = useState<ValidacionReporte | null>(null);
+  const [validando, setValidando] = useState(false);
   const submittingLockRef = useRef<boolean>(false);
-  const idempotencyKeyRef = useRef<string>(
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `clk-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  );
+  const { colores: coloresCatalogo } = useColores();
 
+  // El personal interno registra proyectos a nombre de un cliente: no se precargan sus propios datos
   const buildDefaultFormData = (): ProjectFormData => ({
-    clienteTipo: currentUser.empresa?.trim() ? 'EMPRESA' : 'PERSONA_NATURAL',
-    clienteNombre: currentUser.nombre_completo || '',
-    clienteEmpresa: currentUser.empresa || '',
-    clienteDocumento: currentUser.documento_nit || '',
-    clienteTelefono: currentUser.telefono || '',
-    clienteCorreo: currentUser.email || '',
-    clienteCanal: 'WEB',
+    clienteTipo: !staff && user?.empresa?.trim() ? 'EMPRESA' : 'PERSONA_NATURAL',
+    clienteNombre: staff ? '' : user?.nombre_completo || '',
+    clienteEmpresa: staff ? '' : user?.empresa || '',
+    clienteTipoDocumento: staff ? 'CC' : user?.tipo_documento || (user?.empresa?.trim() ? 'NIT' : 'CC'),
+    clienteDocumento: staff ? '' : user?.documento || '',
+    clienteTelefono: staff ? '' : filtrar.telefono(normalizar.telefono(user?.telefono)),
+    clienteCorreo: staff ? '' : user?.email || '',
+    clienteCanal: staff ? 'COMERCIAL' : 'WEB',
 
-    proyectoNombre: 'Renovación y protección de superficies',
-    ciudad: 'Bogotá D.C.',
-    direccion: 'Calle 85 # 15-24',
+    proyectoNombre: '',
+    ciudad: staff ? '' : user?.ciudad || '',
+    direccion: staff ? '' : user?.direccion || '',
     tipoProyecto: 'RESIDENCIAL',
-    fechaRequerida: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+    fechaRequerida: '',
 
     tipoSuperficie: prefill?.tipoSuperficie || 'MAMPOSTERIA',
-    areaAproximada: 65,
+    areaAproximada: 0,
     unidadMedida: 'm2',
     ambiente: 'RESIDENCIAL',
     ubicacion: prefill?.ubicacion || 'INTERIOR',
-    colorActual: 'Blanco desgastado',
-    colorRequerido: prefill?.colorRequerido || 'Marfil Luz (muestra ilustrativa #F4EFE6)',
+    colorActual: '',
+    colorRequerido: '',
+    colores: (prefill?.colores || []).slice(0, MAX_COLORES_PROYECTO),
 
-    humedad: prefill?.humedad || 'MEDIA',
-    fisuras: prefill?.fisuras !== undefined ? prefill.fisuras : true,
+    humedad: prefill?.humedad || 'BAJA',
+    fisuras: prefill?.fisuras ?? false,
     tipoFisura: 'SUPERFICIAL',
-    desgaste: prefill?.desgaste || 'MODERADO',
+    desgaste: prefill?.desgaste || 'LEVE',
     desprendimiento: false,
-    estadoSuperficie: 'Muros con pérdida de acabado uniforme y microfisuras puntuales.',
-    descripcionProblema: prefill?.descripcionProblema || DEFAULT_PROBLEM_DESC,
+    estadoSuperficie: '',
+    descripcionProblema: prefill?.descripcionProblema || '',
 
     evidencias: [],
 
-    autorizacionDatos: true,
-    autorizacionUsoTecnico: true,
-    origenCanal: 'PORTAL_CLIENTE_WEB',
+    autorizacionDatos: false,
+    autorizacionUsoTecnico: false,
   });
 
   const [formData, setFormData] = useState<ProjectFormData>(() => {
@@ -105,6 +129,15 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
           ...base,
           ...parsed,
           clienteTipo: inferredTipo,
+          // El cliente siempre usa el correo de su cuenta; las autorizaciones se confirman cada vez
+          clienteCorreo: staff ? parsed.clienteCorreo || '' : base.clienteCorreo,
+          autorizacionDatos: false,
+          autorizacionUsoTecnico: false,
+          confirmarDuplicado: false,
+          // Solo se admite el área en m²
+          unidadMedida: 'm2',
+          // Los borradores anteriores guardaban el color como texto libre
+          colores: Array.isArray(parsed.colores) ? parsed.colores.slice(0, MAX_COLORES_PROYECTO) : base.colores,
         };
       }
     } catch {
@@ -122,6 +155,28 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
     }
   }, [formData]);
 
+  // En el paso 5 el servidor valida completitud, formato, coherencia, duplicidad y trazabilidad;
+  // se repite cuando cambian las autorizaciones o la confirmación de duplicado
+  useEffect(() => {
+    if (currentStep !== 5) return;
+    let vigente = true;
+    setValidando(true);
+    const timer = window.setTimeout(() => {
+      api
+        .post<ValidacionReporte>('/proyectos/validar', formData)
+        .then((r) => vigente && setValidacion(r))
+        .catch(() => vigente && setValidacion(null))
+        .finally(() => vigente && setValidando(false));
+    }, 350);
+    return () => {
+      vigente = false;
+      window.clearTimeout(timer);
+    };
+  }, [currentStep, formData]);
+
+  const requiereConfirmarDuplicado =
+    formData.confirmarDuplicado || Boolean(validacion?.hallazgos.some((h) => h.campo === 'confirmarDuplicado'));
+
   // Fusionar preselección de color o solución sin borrar datos previamente ingresados
   useEffect(() => {
     if (!prefill) return;
@@ -129,7 +184,7 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
       let nextDesc = prev.descripcionProblema;
       if (prefill.descripcionProblema) {
         const trimmedCurrent = prev.descripcionProblema.trim();
-        if (!trimmedCurrent || trimmedCurrent === DEFAULT_PROBLEM_DESC) {
+        if (!trimmedCurrent) {
           nextDesc = prefill.descripcionProblema;
         } else if (!trimmedCurrent.includes(prefill.descripcionProblema)) {
           nextDesc = `${trimmedCurrent} | ${prefill.descripcionProblema}`;
@@ -138,7 +193,7 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
 
       return {
         ...prev,
-        colorRequerido: prefill.colorRequerido || prev.colorRequerido,
+        colores: prefill.colores?.length ? prefill.colores.slice(0, MAX_COLORES_PROYECTO) : prev.colores,
         tipoSuperficie: prefill.tipoSuperficie || prev.tipoSuperficie,
         ubicacion: prefill.ubicacion || prev.ubicacion,
         descripcionProblema: nextDesc,
@@ -153,51 +208,94 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    const selected = Array.from(files).slice(0, Math.max(0, 12 - formData.evidencias.length));
+    e.target.value = '';
     setUploadingPhoto(true);
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const res = await uploadEvidenceFile(file, 'nuevo-proyecto');
+      // Cada foto se guarda en Supabase Storage y queda vinculada al proyecto al confirmarlo
+      for (const file of selected) {
+        const res = await api.post<{
+          storage_path: string;
+          preview_url: string | null;
+          nombre_archivo: string;
+          tamano_bytes: number;
+          mime_type: string;
+        }>('/archivos/evidencias', await fileToUpload(file));
         setFormData((prev) => ({
           ...prev,
           evidencias: [
             ...prev.evidencias,
             {
-              id: `ev-${Date.now()}-${i}`,
-              archivo_url: res.url,
+              storage_path: res.storage_path,
+              preview_url: res.preview_url || '',
               nombre_archivo: res.nombre_archivo,
-              descripcion: `Fotografía del espacio (${file.name})`,
-              fecha_captura: new Date().toISOString(),
+              descripcion: '',
               tamano_bytes: res.tamano_bytes,
               mime_type: res.mime_type,
             },
           ],
         }));
       }
+    } catch (err) {
+      toast(errorMessage(err), 'error');
     } finally {
       setUploadingPhoto(false);
     }
   };
 
-  const updateEvidenceDescription = (id: string, descripcion: string) => {
+  const updateEvidenceDescription = (path: string, descripcion: string) => {
     setFormData((prev) => ({
       ...prev,
-      evidencias: prev.evidencias.map((ev) => (ev.id === id ? { ...ev, descripcion } : ev)),
+      evidencias: prev.evidencias.map((ev) => (ev.storage_path === path ? { ...ev, descripcion } : ev)),
     }));
   };
 
-  const removeEvidence = (id: string) => {
+  const removeEvidence = (path: string) => {
     setFormData((prev) => ({
       ...prev,
-      evidencias: prev.evidencias.filter((ev) => ev.id !== id),
+      evidencias: prev.evidencias.filter((ev) => ev.storage_path !== path),
     }));
+  };
+
+  // ---------------------------------------------------------------------------
+  // Identificación del cliente (mismas reglas que el registro: src/data/reglasRegistro.ts)
+  // ---------------------------------------------------------------------------
+  const juridica = formData.clienteTipo !== 'PERSONA_NATURAL';
+  const tipoDocumento = (juridica ? 'NIT' : formData.clienteTipoDocumento || 'CC') as TipoDocumento;
+
+  /** Un cliente con su identificación completa no vuelve a escribirla: se toma de su cuenta */
+  const perfilCompleto =
+    !staff &&
+    Boolean(user) &&
+    !validarCampo.nombreCompleto(normalizar.texto(user?.nombre_completo)) &&
+    !validarCampo.telefono(normalizar.telefono(user?.telefono)) &&
+    (!user?.empresa || (Boolean(user?.documento) && !validarCampo.documento(user?.documento || '', 'NIT')));
+
+  const errorDatosCliente = (): string | null => {
+    const f = formData;
+    if (juridica) {
+      if (!f.clienteEmpresa.trim()) return 'Escribe la razón social de la empresa, copropiedad o entidad.';
+      const e = validarCampo.razonSocial(normalizar.texto(f.clienteEmpresa));
+      if (e) return e;
+    }
+    const nombre = validarCampo.nombreCompleto(normalizar.texto(f.clienteNombre));
+    if (nombre) return juridica ? `Persona de contacto: ${nombre.charAt(0).toLowerCase()}${nombre.slice(1)}` : nombre;
+    if (juridica && !f.clienteDocumento) return 'Escribe el NIT con su dígito de verificación.';
+    if (f.clienteDocumento) {
+      const e = validarCampo.documento(normalizar.documento(f.clienteDocumento, tipoDocumento), tipoDocumento);
+      if (e) return e;
+    }
+    const tel = validarCampo.telefono(f.clienteTelefono);
+    if (tel) return tel;
+    return validarCampo.email(f.clienteCorreo.trim());
   };
 
   const validateCurrentStep = (): boolean => {
     setStepValidationMsg(null);
-    if (currentStep === 1) {
-      if (!formData.clienteNombre.trim() || !formData.clienteCorreo.trim() || !formData.clienteTelefono.trim()) {
-        setStepValidationMsg('Por favor ingresa tu nombre completo, teléfono y correo electrónico para continuar.');
+    if (currentStep === 1 && !perfilCompleto) {
+      const error = errorDatosCliente();
+      if (error) {
+        setStepValidationMsg(error);
         return false;
       }
     }
@@ -208,8 +306,8 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
       }
     }
     if (currentStep === 3) {
-      if (!formData.areaAproximada || formData.areaAproximada <= 0 || !formData.descripcionProblema.trim()) {
-        setStepValidationMsg('Por favor especifica un área aproximada mayor a 0 y una breve descripción de la necesidad.');
+      if (!formData.areaAproximada || formData.areaAproximada <= 0 || formData.descripcionProblema.trim().length < 10) {
+        setStepValidationMsg('Indica un área aproximada mayor a 0 y describe tu necesidad (mínimo 10 caracteres).');
         return false;
       }
     }
@@ -220,8 +318,22 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
     if (!validateCurrentStep()) return;
 
     if (currentStep === 3) {
-      const diag = await runColorlinkAIDiagnosis(formData);
-      setAiPreview(diag);
+      // La orientación es informativa: si falla, el cliente puede continuar igual
+      setAiPreview(null);
+      api
+        .post<AIDiagnosisResult>('/ia/diagnostico', {
+          tipoSuperficie: formData.tipoSuperficie,
+          areaAproximada: formData.areaAproximada,
+          ambiente: formData.ambiente,
+          ubicacion: formData.ubicacion,
+          humedad: formData.humedad,
+          fisuras: formData.fisuras,
+          desgaste: formData.desgaste,
+          desprendimiento: formData.desprendimiento,
+          descripcionProblema: formData.descripcionProblema,
+        })
+        .then(setAiPreview)
+        .catch(() => setAiPreview(null));
     }
     setCurrentStep((prev) => Math.min(prev + 1, 5));
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -233,15 +345,9 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const requiresTechnicalAuthorization = Boolean(
-    formData.descripcionProblema.trim() ||
-      formData.estadoSuperficie.trim() ||
-      formData.evidencias.length > 0
-  );
-
-  const isConfirmationAllowed =
-    formData.autorizacionDatos &&
-    (!requiresTechnicalAuthorization || formData.autorizacionUsoTecnico);
+  // El diagnóstico siempre usa la información técnica registrada: ambas autorizaciones son necesarias
+  const requiresTechnicalAuthorization = true;
+  const isConfirmationAllowed = formData.autorizacionDatos && formData.autorizacionUsoTecnico;
 
   const handleSubmit = async () => {
     if (submittingLockRef.current) return;
@@ -272,35 +378,16 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const payload: ProjectFormData = {
-        ...formData,
-        descripcionProblema: [
-          formData.descripcionProblema,
-          formData.colorRequerido ? `Color deseado: ${formData.colorRequerido}` : '',
-        ]
-          .filter(Boolean)
-          .join(' | '),
-      };
-      const createdProject = await projectService.createProjectFromWizard(
-        payload,
-        currentUser.id,
-        idempotencyKeyRef.current
-      );
+      const createdProject = await api.post<Proyecto>('/proyectos', formData);
       try {
         window.sessionStorage.removeItem(WIZARD_DRAFT_STORAGE_KEY);
       } catch {
         // Ignorar errores de sessionStorage restringido
       }
-      idempotencyKeyRef.current =
-        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-          ? crypto.randomUUID()
-          : `clk-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      toast(`Proyecto ${createdProject.codigo} registrado. Te enviamos la confirmación por correo.`);
       onSuccess(createdProject.id);
-    } catch (err: any) {
-      setSubmitError(
-        err?.message ||
-          'No fue posible confirmar el registro en Supabase. Revisa la conexión e inténtalo nuevamente.'
-      );
+    } catch (err) {
+      setSubmitError(errorMessage(err));
     } finally {
       submittingLockRef.current = false;
       setIsSubmitting(false);
@@ -337,7 +424,7 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
           onClick={onCancel}
           className="text-xs font-bold text-[#092653] hover:text-[#155EEF] px-3.5 py-2 rounded-xl border border-[#E7EAF0] bg-white hover:bg-[#FAFAF7] transition-colors self-start sm:self-center whitespace-nowrap cursor-pointer"
         >
-          Seguir explorando tienda
+          Salir y continuar después
         </button>
       </div>
 
@@ -420,20 +507,65 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
               </p>
             </div>
 
+            {perfilCompleto && user ? (
+              <div className="rounded-2xl border border-[#08B6CC]/30 bg-[#08B6CC]/5 p-5 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-[#092653]">
+                    <CheckCircle2 className="w-4 h-4 text-[#08B6CC]" />
+                    Usaremos los datos de tu cuenta
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigate('cuenta', 'perfil')}
+                    className="text-xs font-semibold text-[#1D4ED8] hover:underline cursor-pointer"
+                  >
+                    ¿Algo cambió? Actualízalo en Mi cuenta
+                  </button>
+                </div>
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                  {user.empresa && (
+                    <div>
+                      <dt className="text-xs text-slate-500">Empresa</dt>
+                      <dd className="font-semibold text-[#0B1F3A]">{user.empresa}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="text-xs text-slate-500">{user.empresa ? 'Persona de contacto' : 'Nombre'}</dt>
+                    <dd className="font-semibold text-[#0B1F3A]">{user.nombre_completo}</dd>
+                  </div>
+                  {user.documento && (
+                    <div>
+                      <dt className="text-xs text-slate-500">{user.tipo_documento === 'NIT' || user.empresa ? 'NIT' : DOCUMENTOS[(user.tipo_documento || 'CC') as TipoDocumentoPersona]?.label ?? 'Documento'}</dt>
+                      <dd className="font-semibold text-[#0B1F3A] font-mono">{user.documento}</dd>
+                    </div>
+                  )}
+                  <div>
+                    <dt className="text-xs text-slate-500">Celular</dt>
+                    <dd className="font-semibold text-[#0B1F3A]">{formData.clienteTelefono}</dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="text-xs text-slate-500">Correo para el seguimiento</dt>
+                    <dd className="font-semibold text-[#0B1F3A]">{user.email}</dd>
+                  </div>
+                </dl>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Tipo de cliente *
-                </label>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Tipo de cliente *</label>
                 <select
                   value={formData.clienteTipo}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      clienteTipo: e.target.value as ClientType,
-                    })
-                  }
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none"
+                  onChange={(e) => {
+                    const tipo = e.target.value as ClientType;
+                    setFormData((prev) => ({
+                      ...prev,
+                      clienteTipo: tipo,
+                      // Al cambiar entre persona natural y jurídica el documento ya no aplica
+                      clienteTipoDocumento: tipo === 'PERSONA_NATURAL' ? 'CC' : 'NIT',
+                      clienteDocumento: '',
+                    }));
+                  }}
+                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
                 >
                   <option value="PERSONA_NATURAL">Persona natural / Hogar</option>
                   <option value="EMPRESA">Empresa / Constructora / Comercio</option>
@@ -442,78 +574,101 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Nombre completo del cliente *
-                </label>
+              {juridica && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 block mb-1.5">Razón social *</label>
+                  <input
+                    type="text"
+                    value={formData.clienteEmpresa}
+                    onChange={(e) => setFormData({ ...formData, clienteEmpresa: filtrar.razonSocial(e.target.value) })}
+                    maxLength={LIMITES.razonSocial.max}
+                    placeholder="Como aparece en el RUT"
+                    className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
+                  />
+                </div>
+              )}
+
+              <div className={juridica ? '' : 'sm:col-span-1'}>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">{juridica ? 'Persona de contacto *' : 'Nombre completo del cliente *'}</label>
                 <input
                   type="text"
-                  required
                   value={formData.clienteNombre}
-                  onChange={(e) => setFormData({ ...formData, clienteNombre: e.target.value })}
-                  placeholder="Ej. Carlos Eduardo Mendoza"
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15"
+                  onChange={(e) => setFormData({ ...formData, clienteNombre: filtrar.nombre(e.target.value, LIMITES.nombreCompleto.max) })}
+                  maxLength={LIMITES.nombreCompleto.max}
+                  placeholder="Nombre y apellido"
+                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Documento o NIT de identificación
-                </label>
-                <input
-                  type="text"
-                  value={formData.clienteDocumento}
-                  onChange={(e) => setFormData({ ...formData, clienteDocumento: e.target.value })}
-                  placeholder="Ej. 1.020.458.120 o 900.548.120-4"
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15"
-                />
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">{juridica ? 'NIT con dígito de verificación *' : 'Documento de identidad'}</label>
+                <div className={juridica ? '' : 'grid grid-cols-[6.5rem_1fr] gap-2'}>
+                  {!juridica && (
+                    <select
+                      value={formData.clienteTipoDocumento}
+                      onChange={(e) => {
+                        const tipo = e.target.value as TipoDocumentoPersona;
+                        setFormData((prev) => ({ ...prev, clienteTipoDocumento: tipo, clienteDocumento: filtrar.documento(prev.clienteDocumento, tipo) }));
+                      }}
+                      aria-label="Tipo de documento"
+                      className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
+                    >
+                      {(Object.keys(DOCUMENTOS) as TipoDocumentoPersona[]).map((t) => (
+                        <option key={t} value={t}>
+                          {DOCUMENTOS[t].label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    value={formData.clienteDocumento}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        clienteDocumento: juridica
+                          ? filtrar.nit(e.target.value)
+                          : filtrar.documento(e.target.value, tipoDocumento as TipoDocumentoPersona),
+                      })
+                    }
+                    inputMode={tipoDocumento === 'PA' ? 'text' : 'numeric'}
+                    placeholder={juridica ? '901234567-8' : 'Sin puntos ni espacios'}
+                    className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500 font-mono"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">{ayudaDocumento(tipoDocumento)}{juridica ? '' : ' Opcional.'}</p>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Teléfono de contacto *
-                </label>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Celular de contacto *</label>
                 <input
                   type="tel"
-                  required
+                  inputMode="numeric"
                   value={formData.clienteTelefono}
-                  onChange={(e) => setFormData({ ...formData, clienteTelefono: e.target.value })}
-                  placeholder="Ej. +57 312 458 9901"
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15"
+                  onChange={(e) => setFormData({ ...formData, clienteTelefono: filtrar.telefono(e.target.value) })}
+                  maxLength={LIMITES.telefono.largo}
+                  placeholder="3001234567"
+                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Correo electrónico *
-                </label>
+              <div className={juridica ? 'sm:col-span-2' : ''}>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Correo electrónico *</label>
                 <input
                   type="email"
-                  required
                   value={formData.clienteCorreo}
-                  onChange={(e) => setFormData({ ...formData, clienteCorreo: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, clienteCorreo: filtrar.email(e.target.value) })}
+                  disabled={!staff}
+                  maxLength={LIMITES.email.max}
+                  title={!staff ? 'Es el correo de tu cuenta: allí recibirás el seguimiento.' : undefined}
                   placeholder="nombre@correo.com"
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15"
+                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Empresa o copropiedad (opcional)
-                </label>
-                <input
-                  type="text"
-                  value={formData.clienteEmpresa}
-                  onChange={(e) => setFormData({ ...formData, clienteEmpresa: e.target.value })}
-                  placeholder="Opcional si es persona natural"
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15"
-                />
-              </div>
-
+              {staff && (
               <div className="sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-700 block mb-1.5">
-                  Canal de contacto preferido
-                </label>
+                <label className="text-xs font-semibold text-slate-700 block mb-1.5">Canal por el que llegó el cliente</label>
                 <select
                   value={formData.clienteCanal}
                   onChange={(e) =>
@@ -522,7 +677,7 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                       clienteCanal: e.target.value as ProjectFormData['clienteCanal'],
                     })
                   }
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none"
+                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/15 disabled:text-slate-500"
                 >
                   <option value="WEB">Plataforma Web COLORLINK</option>
                   <option value="WHATSAPP">Atención vía WhatsApp</option>
@@ -531,7 +686,9 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                   <option value="FERIA">Evento o Punto físico</option>
                 </select>
               </div>
+              )}
             </div>
+            )}
           </div>
         )}
 
@@ -570,17 +727,13 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                   <label className="text-xs font-semibold text-slate-700 block mb-1.5">
                     Ciudad o municipio *
                   </label>
-                  <div className="relative">
-                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
-                    <input
-                      type="text"
-                      required
-                      value={formData.ciudad}
-                      onChange={(e) => setFormData({ ...formData, ciudad: e.target.value })}
-                      placeholder="Ej. Bogotá D.C., Medellín, Cali"
-                      className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 focus:outline-none"
-                    />
-                  </div>
+                  <CiudadCombobox
+                    value={formData.ciudad}
+                    onChange={(ciudad) => setFormData((prev) => ({ ...prev, ciudad }))}
+                    required
+                    placeholder="Ej. Bogotá D.C., Medellín, Cali"
+                    inputClassName="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none"
+                  />
                 </div>
 
                 <div>
@@ -701,7 +854,7 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                     type="number"
                     min="1"
                     required
-                    value={formData.areaAproximada}
+                    value={formData.areaAproximada || ''}
                     onChange={(e) =>
                       setFormData({ ...formData, areaAproximada: Number(e.target.value) })
                     }
@@ -710,28 +863,25 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-1.5">Unidad</label>
-                  <select
-                    value={formData.unidadMedida}
-                    onChange={(e) => setFormData({ ...formData, unidadMedida: e.target.value })}
-                    className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none"
-                  >
-                    <option value="m2">m²</option>
-                    <option value="m">m lin.</option>
-                  </select>
+                  <span className="w-full block bg-slate-100 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700">
+                    m²
+                  </span>
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1.5">
+                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
                   <Palette className="w-3.5 h-3.5 text-[#0891B2]" />
-                  <span>Color o acabado deseado</span>
+                  <span>Colores del proyecto</span>
+                  <span className="font-normal text-slate-500">· elige hasta {MAX_COLORES_PROYECTO}</span>
                 </label>
-                <input
-                  type="text"
-                  value={formData.colorRequerido}
-                  onChange={(e) => setFormData({ ...formData, colorRequerido: e.target.value })}
-                  placeholder="Ej. Blanco cálido mate, Verde Salvia, Gris Bruma..."
-                  className="w-full bg-[#FAF9F6] focus:bg-white border border-slate-300 focus:border-[#1D4ED8] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none"
+                <p className="text-[11px] text-slate-500 mb-3">
+                  El primero es el color principal; el segundo, opcional, para un muro o detalles.
+                </p>
+                <ColorPicker
+                  value={formData.colores}
+                  onChange={(colores) => setFormData((prev) => ({ ...prev, colores }))}
+                  areaM2={Number(formData.areaAproximada) || 0}
                 />
               </div>
             </div>
@@ -844,8 +994,8 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                 <span>4. Evidencias fotográficas</span>
               </h2>
               <p className="text-sm text-slate-600 mt-1">
-                Agrega fotografías del espacio o de los detalles que quieras mostrar al equipo técnico
-                (opcional pero recomendado).
+                Agrega fotografías del espacio y, si los tienes, documentos en PDF (fichas técnicas, planos,
+                actas). COLORLINK IA los analiza para clasificar tu necesidad (opcional pero recomendado).
               </p>
             </div>
 
@@ -858,14 +1008,14 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                 Sube fotografías de tus paredes, fachadas o áreas a intervenir
               </p>
               <p className="text-xs text-slate-500 mt-1 mb-4">
-                Formatos JPG, PNG o WebP. Puedes añadir una breve nota en cada foto.
+                Fotos JPG, PNG o WebP y documentos PDF de hasta 8 MB. Puedes añadir una breve nota en cada archivo.
               </p>
               <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0B1F3A] hover:bg-[#1D4ED8] text-white rounded-xl text-xs font-semibold cursor-pointer transition-colors">
-                <span>{uploadingPhoto ? 'Cargando imagen...' : 'Seleccionar fotografías'}</span>
+                <span>{uploadingPhoto ? 'Cargando archivo...' : 'Seleccionar fotos o documentos'}</span>
                 <input
                   type="file"
                   multiple
-                  accept="image/*"
+                  accept="image/*,application/pdf"
                   onChange={handleFileUpload}
                   disabled={uploadingPhoto}
                   className="hidden"
@@ -877,21 +1027,27 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
             {formData.evidencias.length > 0 && (
               <div className="space-y-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">
-                  Fotografías adjuntas ({formData.evidencias.length})
+                  Evidencias adjuntas ({formData.evidencias.length})
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {formData.evidencias.map((ev) => (
                     <div
-                      key={ev.id}
+                      key={ev.storage_path}
                       className="p-3.5 bg-[#FAF9F6] border border-slate-200 rounded-2xl flex items-start gap-3"
                     >
                       <div className="w-16 h-16 rounded-xl bg-slate-200 overflow-hidden shrink-0 border border-slate-200">
-                        <img
-                          src={ev.archivo_url}
-                          alt={ev.nombre_archivo}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover"
-                        />
+                        {ev.mime_type === 'application/pdf' ? (
+                          <span className="w-full h-full flex items-center justify-center bg-white text-rose-600">
+                            <FileText className="w-7 h-7" />
+                          </span>
+                        ) : (
+                          <img
+                            src={ev.preview_url}
+                            alt={ev.nombre_archivo}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0 space-y-1.5">
                         <p className="text-xs font-bold text-[#0B1F3A] truncate">
@@ -900,15 +1056,15 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
                         <input
                           type="text"
                           value={ev.descripcion}
-                          onChange={(e) => updateEvidenceDescription(ev.id, e.target.value)}
-                          placeholder="Descripción de esta foto..."
+                          onChange={(e) => updateEvidenceDescription(ev.storage_path, e.target.value)}
+                          placeholder="Descripción de este archivo..."
                           className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-700 focus:outline-none focus:border-[#1D4ED8]"
                         />
                       </div>
                       <button
                         type="button"
-                        onClick={() => removeEvidence(ev.id)}
-                        aria-label="Eliminar fotografía"
+                        onClick={() => removeEvidence(ev.storage_path)}
+                        aria-label="Eliminar evidencia"
                         className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -992,19 +1148,61 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
 
               <div className="pt-3 border-t border-slate-200/80 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
-                  <span className="text-slate-500">Color deseado: </span>
-                  <span className="font-semibold text-[#0B1F3A]">
-                    {formData.colorRequerido || 'Por definir'}
-                  </span>
+                  <span className="text-slate-500">Colores: </span>
+                  {formData.colores.length ? (
+                    <span className="inline-flex flex-wrap items-center gap-1.5 align-middle">
+                      {formData.colores.map((id, i) => {
+                        const c = coloresCatalogo?.find((x) => x.id === id);
+                        return (
+                          <span key={id} className="inline-flex items-center gap-1 font-semibold text-[#0B1F3A]">
+                            <span className="w-3 h-3 rounded-full border border-black/10" style={{ backgroundColor: c?.hex }} />
+                            {c?.nombre ?? id}
+                            <span className="font-normal text-slate-400">({i === 0 ? 'principal' : 'secundario'})</span>
+                          </span>
+                        );
+                      })}
+                    </span>
+                  ) : (
+                    <span className="font-semibold text-[#0B1F3A]">Por definir con tu asesor</span>
+                  )}
                 </div>
                 <div>
-                  <span className="text-slate-500">Fotografías adjuntas: </span>
+                  <span className="text-slate-500">Evidencias adjuntas: </span>
                   <span className="font-semibold text-[#0B1F3A] tabular-nums">
                     {formData.evidencias.length} archivo(s)
                   </span>
                 </div>
               </div>
             </div>
+
+            {/* Validación automática en el servidor */}
+            {validacion ? (
+              <div className={validando ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+                <ValidacionReportePanel reporte={validacion} titulo="Validación automática de tu solicitud" />
+              </div>
+            ) : (
+              validando && (
+                <p className="text-xs text-slate-500 flex items-center gap-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  Validando la información…
+                </p>
+              )
+            )}
+
+            {requiereConfirmarDuplicado && (
+              <label className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.confirmarDuplicado)}
+                  onChange={(e) => setFormData({ ...formData, confirmarDuplicado: e.target.checked })}
+                  className="w-4 h-4 mt-0.5 accent-[#0891B2] rounded shrink-0"
+                />
+                <span className="text-amber-900 leading-relaxed">
+                  <strong>Es una solicitud diferente.</strong> Confirmo que no es la misma solicitud que el
+                  proyecto parecido que ya está registrado.
+                </span>
+              </label>
+            )}
 
             {/* Casillas de consentimiento informado */}
             <div className="space-y-3 p-5 rounded-2xl bg-white border border-slate-200 text-xs">
@@ -1114,7 +1312,7 @@ export const NewProjectWizard: React.FC<NewProjectWizardProps> = ({
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={isSubmitting || !isConfirmationAllowed}
+              disabled={isSubmitting || validando || !isConfirmationAllowed || validacion?.estado === 'RECHAZADA'}
               className="px-6 py-3 rounded-xl bg-[#0891B2] hover:bg-[#0E7490] text-white text-xs font-semibold inline-flex items-center gap-2 shadow-sm transition-colors disabled:opacity-50 whitespace-nowrap cursor-pointer"
             >
               <Check className="w-4 h-4" />
