@@ -1,0 +1,68 @@
+-- ==============================================================================
+-- COLORLINK · Catálogo inicial de la tienda
+-- Productos base para que la tienda no arranque vacía. Precios en COP con IVA
+-- incluido. Edítalos desde Panel → Productos o directamente aquí.
+-- Idempotente: no sobrescribe productos que ya existan con el mismo SKU.
+-- ==============================================================================
+
+insert into public.productos
+  (sku, slug, nombre, descripcion, categoria, presentacion, unidad, precio, precio_anterior, costo, stock, stock_minimo, color_hex, acabado, rendimiento_m2, destacado)
+values
+  ('INT-MAR-GAL', 'pintura-interior-marfil-luz-galon', 'Pintura interior Marfil Luz',
+   'Vinilo acrílico tipo 1 lavable, de bajo olor y secado rápido. Ideal para salas y habitaciones que buscan calidez luminosa.',
+   'INTERIOR', 'Galón (3,78 L)', 'GALON', 89900, 99900, 52000, 60, 10, '#F4EFE6', 'Mate', 40, true),
+  ('INT-SAL-GAL', 'pintura-interior-verde-salvia-galon', 'Pintura interior Verde Salvia',
+   'Vinilo acrílico tipo 1 en un verde sereno que aporta calma natural a habitaciones, estudios y zonas de lectura.',
+   'INTERIOR', 'Galón (3,78 L)', 'GALON', 92900, null, 54000, 45, 10, '#96AD98', 'Mate', 40, true),
+  ('INT-ALG-CUN', 'pintura-interior-blanco-algodon-cunete', 'Pintura interior Blanco Algodón',
+   'Blanco neutro de alto poder cubriente para grandes superficies, oficinas y proyectos de obra.',
+   'INTERIOR', 'Cuñete (18,9 L)', 'CUNETE', 359900, 389900, 210000, 18, 4, '#FAF7F2', 'Mate', 200, false),
+  ('INT-TER-GAL', 'pintura-interior-terracota-galon', 'Pintura interior Terracota',
+   'Tono tierra con personalidad para muros focales en comedores y espacios sociales.',
+   'INTERIOR', 'Galón (3,78 L)', 'GALON', 94900, null, 55000, 30, 8, '#C66B53', 'Satinado', 38, false),
+  ('EXT-PIE-GAL', 'pintura-exterior-piedra-serena-galon', 'Pintura para fachadas Piedra Serena',
+   'Acrílico elastomérico para exteriores con protección UV y resistencia a la lluvia. Mantiene el color por más tiempo.',
+   'EXTERIOR', 'Galón (3,78 L)', 'GALON', 124900, 139900, 72000, 40, 8, '#D8D2C5', 'Mate', 30, true),
+  ('EXT-AZP-GAL', 'pintura-exterior-azul-profundo-galon', 'Pintura para fachadas Azul Profundo',
+   'Acrílico de intemperie con alta retención de color para fachadas modernas, portones y detalles arquitectónicos.',
+   'EXTERIOR', 'Galón (3,78 L)', 'GALON', 129900, null, 75000, 25, 6, '#1E3A5F', 'Satinado', 30, false),
+  ('EXT-BLA-CUN', 'pintura-exterior-blanco-cunete', 'Pintura para fachadas Blanco Intemperie',
+   'Recubrimiento acrílico exterior en cuñete para edificios, conjuntos y muros perimetrales.',
+   'EXTERIOR', 'Cuñete (18,9 L)', 'CUNETE', 529900, null, 310000, 12, 3, '#FAFAF7', 'Mate', 150, false),
+  ('HUM-IMP-CUN', 'impermeabilizante-acrilico-cubiertas', 'Impermeabilizante acrílico para cubiertas',
+   'Membrana líquida flexible para losas, terrazas y techos. Acompaña el movimiento térmico sin agrietarse.',
+   'HUMEDAD', 'Cuñete (18,9 L)', 'CUNETE', 389900, 429900, 228000, 22, 5, '#E9ECEF', 'Elastomérico', 18, true),
+  ('HUM-ANT-GAL', 'sellador-antihumedad-muros', 'Sellador antihumedad para muros',
+   'Bloquea la humedad por capilaridad en muros interiores antes de pintar. Previene manchas y salitre.',
+   'HUMEDAD', 'Galón (3,78 L)', 'GALON', 109900, null, 63000, 35, 8, null, 'Transparente', 20, false),
+  ('HUM-HID-GAL', 'hidrofugo-fachadas-ladrillo', 'Hidrófugo para fachadas en ladrillo',
+   'Protección invisible base silano-siloxano que repele el agua sin cambiar el aspecto del ladrillo.',
+   'HUMEDAD', 'Galón (3,78 L)', 'GALON', 119900, null, 69000, 20, 5, null, 'Invisible', 25, false),
+  ('FIS-MAS-KG', 'masilla-flexible-fisuras', 'Masilla flexible para fisuras',
+   'Resanador acrílico elástico para microfisuras en estuco, revoque y concreto. Se puede pintar encima.',
+   'FISURAS', 'Tarro (1 kg)', 'UNIDAD', 32900, null, 17000, 80, 15, null, null, null, false),
+  ('FIS-MAL-RL', 'malla-refuerzo-fisuras', 'Malla de refuerzo para fisuras',
+   'Malla de fibra de vidrio para reforzar reparaciones de fisuras recurrentes en muros y techos.',
+   'FISURAS', 'Rollo (20 m)', 'UNIDAD', 27900, null, 14000, 50, 10, null, null, null, false),
+  ('PRE-EST-CUN', 'estuco-plastico-interior', 'Estuco plástico listo para usar',
+   'Pasta niveladora para corregir imperfecciones y dejar los muros listos para pintar.',
+   'PREPARACION', 'Cuñete (27 kg)', 'CUNETE', 98900, 109900, 56000, 30, 6, null, null, 12, false),
+  ('PRE-SEL-GAL', 'sellador-imprimante-acrilico', 'Sellador imprimante acrílico',
+   'Regula la absorción del muro y mejora la adherencia y el rendimiento de la pintura final.',
+   'PREPARACION', 'Galón (3,78 L)', 'GALON', 64900, null, 36000, 55, 10, null, 'Transparente', 45, false),
+  ('HER-ROD-9', 'rodillo-felpa-9-pulgadas', 'Rodillo de felpa 9"',
+   'Rodillo de felpa sintética de 3/8" para acabados lisos y uniformes en muros interiores y exteriores.',
+   'HERRAMIENTAS', 'Unidad', 'UNIDAD', 24900, null, 11000, 70, 15, null, null, null, false),
+  ('HER-BRO-3', 'brocha-profesional-3-pulgadas', 'Brocha profesional 3"',
+   'Brocha de cerdas sintéticas para cortes, bordes y detalles. No suelta pelo.',
+   'HERRAMIENTAS', 'Unidad', 'UNIDAD', 15900, null, 7000, 90, 20, null, null, null, false),
+  ('HER-KIT-PRO', 'kit-pintura-completo', 'Kit de pintura completo',
+   'Rodillo, bandeja, extensión, brocha y cinta de enmascarar: todo lo necesario para pintar una habitación.',
+   'HERRAMIENTAS', 'Kit', 'UNIDAD', 69900, 84900, 38000, 25, 5, null, null, null, true),
+  ('DEC-MIN-GAL', 'acabado-decorativo-mineral', 'Acabado decorativo efecto mineral',
+   'Textura arquitectónica de aspecto piedra para muros protagonistas en salas, recepciones y locales.',
+   'DECORATIVOS', 'Galón (3,78 L)', 'GALON', 149900, null, 86000, 15, 4, '#9C8F80', 'Texturizado', 15, false),
+  ('DEC-MET-L', 'pintura-decorativa-metalizada', 'Pintura decorativa metalizada',
+   'Efecto metálico satinado para detalles, molduras y acentos decorativos.',
+   'DECORATIVOS', 'Litro (1 L)', 'UNIDAD', 59900, null, 33000, 20, 5, '#B08D57', 'Metalizado', 10, false)
+on conflict (sku) do nothing;

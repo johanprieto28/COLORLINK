@@ -1,0 +1,70 @@
+name: colorlink-ximena
+
+services:
+  app:
+    build: .
+    image: colorlink-ximena:latest
+    container_name: colorlink-ximena
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      # Puerto del servidor: APP_PORT en .env (por defecto 3001, para no chocar con otro proyecto en 3000).
+      # Usa "127.0.0.1:${APP_PORT:-3001}:3000" si solo vas a publicar por el túnel
+      - "${APP_PORT:-3001}:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Tailscale Funnel: URL pública fija https://<hostname>.<tu-red>.ts.net con HTTPS, sin abrir puertos.
+  # La sesión se guarda en el volumen tailscale-estado: TS_AUTHKEY solo se usa en el primer arranque.
+  tailscale:
+    image: tailscale/tailscale:v1.102.5
+    container_name: colorlink-ximena-funnel
+    hostname: colorlink
+    profiles: ["funnel"]
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: colorlink
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - tailscale-estado:/var/lib/tailscale
+      - ./tailscale:/config:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # Túnel rápido: genera una URL pública https://*.trycloudflare.com (cambia en cada reinicio)
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.2
+    container_name: colorlink-ximena-tunel
+    profiles: ["tunel"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://app:3000
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # Túnel con nombre: URL fija con tu propio dominio (Cloudflare Zero Trust → Networks → Tunnels).
+  # En el panel del túnel, apunta el "Public hostname" a http://app:3000
+  cloudflared-fijo:
+    image: cloudflare/cloudflared:2026.9.2
+    container_name: colorlink-ximena-tunel-fijo
+    profiles: ["tunel-fijo"]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  tailscale-estado:

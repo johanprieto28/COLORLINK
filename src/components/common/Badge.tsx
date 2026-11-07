@@ -1,5 +1,5 @@
 import React from 'react';
-import { ProjectStatus, SeverityLevel, ComplexityLevel, UserRole } from '../../types';
+import { ProjectStatus, SeverityLevel, ComplexityLevel } from '../../types';
 
 interface BadgeProps {
   children: React.ReactNode;
@@ -102,22 +102,5 @@ export function getComplexityBadge(complexity: ComplexityLevel) {
       return <Badge variant="danger">Complejidad crítica</Badge>;
     default:
       return <Badge variant="neutral">{complexity}</Badge>;
-  }
-}
-
-export function getRoleBadge(role: UserRole) {
-  switch (role) {
-    case 'cliente':
-      return <Badge variant="cyan">Cliente</Badge>;
-    case 'tecnico':
-      return <Badge variant="primary">Especialista Técnico</Badge>;
-    case 'comercial':
-      return <Badge variant="warning">Asesor Comercial</Badge>;
-    case 'operaciones':
-      return <Badge variant="success">Operaciones</Badge>;
-    case 'administrador':
-      return <Badge variant="danger">Administrador</Badge>;
-    default:
-      return <Badge variant="neutral">{role}</Badge>;
   }
 }

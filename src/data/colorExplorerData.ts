@@ -67,9 +67,7 @@ export const FAVORITES_STORAGE_KEY = 'colorlink_favorite_colors_v1';
 export const FAVORITES_UPDATED_EVENT = 'colorlink-favorites-updated';
 
 export function getStoredFavoriteColorIds(): string[] {
-  if (typeof window === 'undefined') {
-    return ['clr-marfil-luz', 'clr-verde-salvia'];
-  }
+  if (typeof window === 'undefined') return [];
   try {
     const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY);
     if (raw) {
@@ -79,7 +77,7 @@ export function getStoredFavoriteColorIds(): string[] {
   } catch {
     // Ignorar errores de almacenamiento restringido
   }
-  return ['clr-marfil-luz', 'clr-verde-salvia'];
+  return [];
 }
 
 export function saveStoredFavoriteColorIds(ids: string[]): void {

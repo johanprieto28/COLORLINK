@@ -22,11 +22,13 @@ import {
   AlertTriangle,
   Eye,
 } from 'lucide-react';
-import { ActiveView, SolutionCategoryKey } from '../layout/Navbar';
-import { UserRole, ProjectStatus, HumidityLevel, WearLevel } from '../../types';
+import { SolutionCategoryKey } from '../layout/Navbar';
+import { ProjectStatus, HumidityLevel, WearLevel, Producto, ProyectoResumen } from '../../types';
 import { CATALOG_IMAGES } from '../../assets/images/catalogImages';
-import { projectService } from '../../services/projects/projectService';
-import { authService } from '../../services/auth/authService';
+import { ActiveView, navigate } from '../../lib/router';
+import { useApi } from '../../lib/useApi';
+import { useAuth } from '../../stores/auth';
+import { ProductCard } from '../store/ProductCard';
 import { getStatusBadge } from '../common/Badge';
 import { ColorExplorerSection } from '../common/ColorExplorerSection';
 import {
@@ -38,14 +40,9 @@ import {
 import { WizardPrefill } from '../../App';
 
 interface LandingViewProps {
-  onNavigate: (view: ActiveView, projectId?: string) => void;
-  onSelectCategory?: (category: SolutionCategoryKey) => void;
   onExploreColors?: (filter?: Omit<ColorExplorerFilterRequest, 'timestamp'>) => void;
   onStartProjectWithPrefill?: (prefill?: WizardPrefill) => void;
   onOpenAssistant?: () => void;
-  onSwitchRole: (role: UserRole) => void;
-  onOpenSupabaseModal: () => void;
-  activeRole: UserRole;
   colorExplorerRequest?: ColorExplorerFilterRequest;
 }
 
@@ -116,16 +113,19 @@ const HERO_SLIDES = [
 ];
 
 export const LandingView: React.FC<LandingViewProps> = ({
-  onNavigate,
-  onSelectCategory,
   onExploreColors,
   onStartProjectWithPrefill,
   onOpenAssistant,
-  activeRole,
   colorExplorerRequest,
 }) => {
-  const currentUser = authService.getCurrentUser();
-  const userProjects = projectService.getProjects(activeRole, currentUser.id).slice(0, 2);
+  const { user } = useAuth();
+  const { data: misProyectos } = useApi<ProyectoResumen[]>(user ? '/proyectos' : null);
+  const { data: destacados } = useApi<Producto[]>('/productos?destacados=1');
+  const userProjects = (user ? misProyectos || [] : []).slice(0, 2);
+
+  const onNavigate = (view: ActiveView, id?: string) => navigate(view, id);
+  const onSelectCategory = (cat: SolutionCategoryKey) =>
+    navigate('soluciones', undefined, { categoria: cat === 'TODAS' ? undefined : cat });
 
   const [activeSlide, setActiveSlide] = useState<number>(0);
   const [heroPaused, setHeroPaused] = useState<boolean>(false);
@@ -370,8 +370,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
       icon: <Sparkles className="w-5 h-5 text-[#FFE34D]" />,
       accentBg: 'bg-[#092653]',
       onClick: () => {
-        if (onOpenAssistant) onOpenAssistant();
-        else onNavigate('colorlink-ia');
+        onOpenAssistant?.();
       },
     },
   ];
@@ -628,6 +627,34 @@ export const LandingView: React.FC<LandingViewProps> = ({
         onStartProjectWithPrefill={onStartProjectWithPrefill}
         onOpenAssistant={onOpenAssistant}
       />
+
+      {/* Productos destacados de la tienda */}
+      {destacados && destacados.length > 0 && (
+        <section aria-labelledby="destacados-titulo" className="py-14 bg-white border-y border-[#E7EAF0]">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-7">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div className="space-y-1">
+                <span className="text-xs font-bold uppercase tracking-widest text-[#155EEF]">Tienda COLORLINK</span>
+                <h2 id="destacados-titulo" className="font-display text-2xl sm:text-3xl font-extrabold text-[#092653] tracking-tight">
+                  Lo más elegido para renovar tus espacios
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('tienda')}
+                className="inline-flex items-center gap-1.5 text-sm font-bold text-[#155EEF] hover:text-[#092653] cursor-pointer"
+              >
+                Ver toda la tienda <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
+              {destacados.slice(0, 4).map((p) => (
+                <ProductCard key={p.id} producto={p} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* =================================================================== */}
       {/* 4. SECCIÓN DE SOLUCIONES COMERCIALES (6 TARJETAS VISUALES)          */}

@@ -24,9 +24,10 @@ import {
   getStoredFavoriteColorIds,
   saveStoredFavoriteColorIds,
 } from '../../data/colorExplorerData';
-import { PaintBucketPackshot } from './PaintBucketPackshot';
+import { ColorPackshot } from './ColorPackshot';
 import { SpaceColorSimulatorModal } from './SpaceColorSimulatorModal';
 import { WizardPrefill } from '../../App';
+import { ensureCanSaveFavorites } from '../../stores/favorites';
 
 interface ColorExplorerSectionProps {
   externalRequest?: ColorExplorerFilterRequest;
@@ -111,6 +112,7 @@ export const ColorExplorerSection: React.FC<ColorExplorerSectionProps> = ({
   }, [externalRequest]);
 
   const toggleFavorite = (colorId: string) => {
+    if (!ensureCanSaveFavorites()) return;
     setFavoriteIds((prev) => {
       const next = prev.includes(colorId)
         ? prev.filter((id) => id !== colorId)
@@ -276,10 +278,11 @@ export const ColorExplorerSection: React.FC<ColorExplorerSectionProps> = ({
                   <article
                     key={color.id}
                     onClick={() => handleOpenColorDetail(color)}
+                    data-reveal
                     className="group bg-white rounded-2xl border border-[#E7EAF0] hover:border-[#08B6CC]/70 shadow-2xs hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 flex flex-col justify-between overflow-hidden cursor-pointer"
                   >
                     {/* Área superior con cubeta individual centrada sobre fondo claro de estudio */}
-                    <div className="relative bg-[radial-gradient(circle_at_50%_46%,#FFFFFF_0%,#F4F6FA_100%)] border-b border-[#E7EAF0]/80 pt-7 pb-5 px-5 flex items-center justify-center min-h-[248px]">
+                    <div className="relative overflow-hidden bg-[radial-gradient(circle_at_50%_46%,#FFFFFF_0%,#F4F6FA_100%)] border-b border-[#E7EAF0]/80 pt-7 pb-5 px-5 flex items-center justify-center min-h-[248px]">
                       {/* Indicador de favorito */}
                       <button
                         type="button"
@@ -303,10 +306,13 @@ export const ColorExplorerSection: React.FC<ColorExplorerSectionProps> = ({
                         />
                       </button>
 
-                      {/* Recipiente de pintura realista con etiqueta del tono seleccionado */}
-                      <div className="transition-transform duration-200 group-hover:scale-[1.03]">
-                        <PaintBucketPackshot color={color} size="card" />
-                      </div>
+                      {/* Foto del galón con el tono (o la cubeta ilustrada si aún no tiene foto) */}
+                      <ColorPackshot
+                        color={color}
+                        size="card"
+                        fill
+                        className="transition-transform duration-300 group-hover:scale-[1.04]"
+                      />
                     </div>
 
                     {/* Información limpia del producto cromático */}
@@ -421,11 +427,11 @@ export const ColorExplorerSection: React.FC<ColorExplorerSectionProps> = ({
         favoriteIds={favoriteIds}
         onToggleFavorite={toggleFavorite}
         onSelectColorInExplorer={(color) => setDetailColor(color)}
-        onUseInProject={({ colorLabel, ubicacion, suggestedNote }) => {
+        onUseInProject={({ colorIds, ubicacion, suggestedNote }) => {
           setDetailOpen(false);
           if (onStartProjectWithPrefill) {
             onStartProjectWithPrefill({
-              colorRequerido: colorLabel,
+              colores: colorIds,
               ubicacion,
               descripcionProblema: suggestedNote,
             });

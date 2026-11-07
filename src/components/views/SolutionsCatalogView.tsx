@@ -11,14 +11,15 @@ import {
   Wrench,
   X,
   AlertTriangle,
+  ShoppingBag,
 } from 'lucide-react';
-import { ActiveView, SolutionCategoryKey } from '../layout/Navbar';
+import { SolutionCategoryKey } from '../layout/Navbar';
 import { CATALOG_IMAGES } from '../../assets/images/catalogImages';
 import { WizardPrefill } from '../../App';
 import { HumidityLevel, WearLevel } from '../../types';
+import { navigate } from '../../lib/router';
 
 interface SolutionsCatalogViewProps {
-  onNavigate: (view: ActiveView) => void;
   onOpenAssistant?: () => void;
   initialCategory?: SolutionCategoryKey;
   searchQuery?: string;
@@ -41,7 +42,6 @@ interface SolutionSystemItem {
 }
 
 export const SolutionsCatalogView: React.FC<SolutionsCatalogViewProps> = ({
-  onNavigate,
   onOpenAssistant,
   initialCategory = 'TODAS',
   searchQuery = '',
@@ -53,6 +53,11 @@ export const SolutionsCatalogView: React.FC<SolutionsCatalogViewProps> = ({
   useEffect(() => {
     setSelectedCategory(initialCategory);
   }, [initialCategory]);
+
+  const selectCategory = (cat: SolutionCategoryKey) => {
+    setSelectedCategory(cat);
+    navigate('soluciones', undefined, { categoria: cat === 'TODAS' ? undefined : cat });
+  };
 
   const categories: Array<{ id: SolutionCategoryKey; label: string }> = [
     { id: 'TODAS', label: 'Todas las soluciones' },
@@ -337,7 +342,7 @@ export const SolutionsCatalogView: React.FC<SolutionsCatalogViewProps> = ({
             <button
               key={cat.id}
               type="button"
-              onClick={() => setSelectedCategory(cat.id)}
+              onClick={() => selectCategory(cat.id)}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 selectedCategory === cat.id
                   ? 'bg-[#092653] text-white shadow-xs'
@@ -420,17 +425,24 @@ export const SolutionsCatalogView: React.FC<SolutionsCatalogViewProps> = ({
             </div>
 
             <div className="px-6 sm:px-7 py-4 bg-[#FAFAF7] border-t border-[#E7EAF0] flex flex-wrap items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onOpenAssistant) onOpenAssistant();
-                  else onNavigate('colorlink-ia');
-                }}
-                className="text-xs font-bold text-[#08B6CC] hover:text-[#092653] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Consultar con COLORLINK IA</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => navigate('tienda', undefined, { categoria: sol.category })}
+                  className="text-xs font-bold text-[#155EEF] hover:text-[#092653] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  <span>Ver productos</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenAssistant?.()}
+                  className="text-xs font-bold text-[#08B6CC] hover:text-[#092653] inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Consultar con COLORLINK IA</span>
+                </button>
+              </div>
 
               <button
                 type="button"
@@ -438,7 +450,7 @@ export const SolutionsCatalogView: React.FC<SolutionsCatalogViewProps> = ({
                   if (onStartProjectWithPrefill) {
                     onStartProjectWithPrefill(sol.prefill);
                   } else {
-                    onNavigate('crear-proyecto');
+                    navigate('crear-proyecto');
                   }
                 }}
                 className="px-4 py-2.5 bg-[#155EEF] hover:bg-[#092653] text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
